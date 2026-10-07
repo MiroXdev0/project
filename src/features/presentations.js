@@ -12,14 +12,16 @@ export function addPresentation(
     title,
     subject = "",
     date = "",
-    description = ""
+    description = "",
+    details = {}
 ) {
     const presentation = {
-        id: crypto.randomUUID(),
+        id: details.id ?? crypto.randomUUID(),
         title,
         subject,
         date,
         description,
+        fileIds: details.fileIds ?? [],
         createdAt: Date.now()
     };
 

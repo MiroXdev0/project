@@ -1459,6 +1459,132 @@ body.modal-open {
     background: var(--surface-soft);
 }
 
+.presentation-header-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.presentation-card {
+    display: grid;
+    grid-template-columns: 88px minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 16px;
+    padding: 18px;
+}
+
+.presentation-cover {
+    width: 88px;
+    height: 88px;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-medium);
+    background: var(--primary-soft);
+}
+
+.presentation-cover .file-preview {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    border-radius: 0;
+}
+
+.presentation-cover-icon {
+    color: var(--primary);
+    font-size: 34px;
+    font-weight: 800;
+}
+
+.presentation-card .item-content h4 {
+    overflow-wrap: anywhere;
+    white-space: normal;
+    font-size: 16px;
+}
+
+.presentation-attachments {
+    display: grid;
+    gap: 8px;
+    margin-top: 14px;
+}
+
+.presentation-attachment {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-small);
+    background: var(--surface-soft);
+}
+
+.presentation-attachment-info {
+    display: grid;
+    min-width: 0;
+    gap: 4px;
+}
+
+.presentation-attachment-info strong {
+    overflow-wrap: anywhere;
+    color: var(--text);
+    font-size: 13px;
+}
+
+.presentation-attachment-info > span {
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+
+.presentation-attachment-actions {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 6px;
+}
+
+.presentation-upload-heading {
+    margin: 8px 0 0;
+    color: var(--text);
+    font-size: 15px;
+}
+
+.presentation-upload-area {
+    display: grid;
+    min-height: 136px;
+    place-items: center;
+    gap: 10px;
+    padding: 18px;
+    border: 2px dashed var(--border-strong);
+    border-radius: var(--radius-medium);
+    background: var(--surface-soft);
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.presentation-upload-area.dragging {
+    border-color: var(--primary);
+    background: var(--primary-soft);
+}
+
+.presentation-file-picker {
+    width: min(100%, 320px);
+    min-height: 50px;
+}
+
+.presentation-selected-files {
+    max-height: 240px;
+    overflow-y: auto;
+}
+
+.presentation-selected-files .selected-file-row {
+    width: 100%;
+}
+
+.presentation-selected-files .selected-file-summary > span:last-child {
+    overflow-wrap: anywhere;
+}
+
 .modal-content:has(.file-viewer) {
     width: min(100%, 1040px);
     max-height: calc(100dvh - 48px);
@@ -1519,6 +1645,33 @@ body.modal-open {
     color: var(--text-secondary);
     line-height: 1.6;
     text-align: center;
+}
+
+.file-viewer-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    display: flex;
+    width: 100%;
+    justify-content: flex-end;
+    padding: 8px;
+    background: var(--surface);
+}
+
+.file-viewer:fullscreen {
+    width: 100%;
+    height: 100%;
+    max-height: none;
+    padding: 12px;
+    border-radius: 0;
+    background: #111827;
+}
+
+.file-viewer:fullscreen .file-viewer-document,
+.file-viewer:fullscreen .file-viewer-image,
+.file-viewer:fullscreen .file-viewer-media,
+.file-viewer:fullscreen .file-viewer-text {
+    max-height: calc(100dvh - 72px);
 }
 
 .file-thumbnail {
@@ -1734,6 +1887,50 @@ body.modal-open {
         min-height: 44px;
     }
 
+    .presentation-header-actions {
+        display: grid;
+        width: 100%;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .presentation-header-actions button {
+        min-width: 0;
+        min-height: 46px;
+        padding-inline: 10px;
+    }
+
+    .presentation-card {
+        grid-template-columns: 64px minmax(0, 1fr);
+        gap: 12px;
+        padding: 14px;
+    }
+
+    .presentation-cover {
+        width: 64px;
+        height: 64px;
+    }
+
+    .presentation-card > .item-actions {
+        grid-column: 1 / -1;
+        justify-content: flex-start;
+    }
+
+    .presentation-card > .item-actions .item-action,
+    .presentation-attachment-actions .item-action {
+        min-height: 44px;
+    }
+
+    .presentation-attachment {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .presentation-attachment-actions {
+        display: grid;
+        width: 100%;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
     .nav-item {
         min-width: 0;
         min-height: 58px;
@@ -1781,6 +1978,10 @@ body.modal-open {
 
     .list-item {
         min-width: 0;
+    }
+
+    .presentation-header-actions {
+        grid-template-columns: 1fr;
     }
 
     .item-actions:not(.file-actions) {

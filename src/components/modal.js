@@ -94,7 +94,17 @@ export function openModal({
             "input:not([type='hidden']):not([tabindex='-1']), textarea, select"
         );
 
-    (initialFocus ?? firstInput ?? modal.querySelector(".modal-content"))?.focus();
+    const focusTarget =
+        initialFocus ?? firstInput ?? modal.querySelector(".modal-content");
+    focusTarget?.focus();
+    window.requestAnimationFrame(() => {
+        if (
+            modal.classList.contains("visible") &&
+            !modal.contains(document.activeElement)
+        ) {
+            focusTarget?.focus();
+        }
+    });
 }
 
 

@@ -63,6 +63,8 @@ const addButton = document.querySelector("#addButton");
 
 const taskCount = document.querySelector("#taskCount");
 const presentationCount = document.querySelector("#presentationCount");
+const addPresentationProjectButton = document.querySelector("#addPresentationProject");
+const uploadPresentationButton = document.querySelector("#uploadPresentation");
 const noteCount = document.querySelector("#noteCount");
 const fileCount = document.querySelector("#fileCount");
 
@@ -711,8 +713,20 @@ function createPresentationElement(
 ) {
     const item = createElement(
         "article",
-        "list-item"
+        "list-item presentation-card"
     );
+
+    const attachedFiles = (presentation.fileIds ?? [])
+        .map(id => getFiles().find(file => file.id === id))
+        .filter(Boolean);
+    const cover = createElement("div", "presentation-cover");
+    if (attachedFiles.length > 0) {
+        cover.appendChild(createFilePreview(attachedFiles[0]));
+    } else {
+        const icon = createElement("span", "presentation-cover-icon", "P");
+        icon.setAttribute("aria-hidden", "true");
+        cover.appendChild(icon);
+    }
 
     const content = createElement(
         "div",
@@ -770,6 +784,32 @@ function createPresentationElement(
         );
     }
 
+    const attachments = createElement("div", "presentation-attachments");
+    attachedFiles.forEach(file => {
+        const attachment = createElement("article", "presentation-attachment");
+        const attachmentInfo = createElement("div", "presentation-attachment-info");
+        const fileName = createElement("strong", "", file.name);
+        const fileMeta = createElement(
+            "span",
+            "",
+            `${file.type || getFileTypeLabel(file)} · ${formatFileSize(file.size)} · ${formatCreatedDate(file.createdAt)}`
+        );
+        attachmentInfo.append(fileName, fileMeta);
+
+        const attachmentActions = createElement("div", "presentation-attachment-actions");
+        const openButton = createActionButton("Öffnen");
+        openButton.addEventListener("click", () => openStoredFile(file));
+        const downloadButton = createActionButton("Herunterladen");
+        downloadButton.addEventListener("click", () => downloadStoredFile(file));
+        attachmentActions.append(openButton, downloadButton);
+        attachment.append(attachmentInfo, attachmentActions);
+        attachments.appendChild(attachment);
+    });
+
+    if (attachedFiles.length > 0) {
+        content.appendChild(attachments);
+    }
+
     const actions = createItemActions({
         onEdit: () =>
             openPresentationModal(
@@ -778,7 +818,7 @@ function createPresentationElement(
 
         onDelete: () => {
             if (!confirmDelete(
-                `Möchtest du "${presentation.title}" wirklich löschen?`
+                `Möchtest du das Projekt "${presentation.title}" wirklich löschen? Die hochgeladenen Dateien bleiben im Bereich „Dateien“ erhalten.`
             )) {
                 return;
             }
@@ -796,6 +836,7 @@ function createPresentationElement(
     });
 
     item.append(
+        cover,
         content,
         actions
     );
@@ -817,7 +858,7 @@ function renderPresentations() {
             selectedSubject
                 ? `Keine Präsentationen im Fach ${selectedSubject}`
                 : "Noch keine Präsentationen",
-            "Plane Referate und behalte wichtige Termine im Blick.",
+            "Erstelle ein Projekt, hänge deine Präsentation und Materialien an und behalte Termine im Blick.",
             selectedSubject ? "Filter zurücksetzen" : "Präsentation hinzufügen",
             selectedSubject
                 ? () => {
@@ -851,7 +892,8 @@ function renderPresentations() {
 
 
 function openPresentationModal(
-    existingPresentation = null
+    existingPresentation = null,
+    { focusUpload = false } = {}
 ) {
     const isEditing =
         Boolean(existingPresentation);
@@ -896,21 +938,158 @@ function openPresentationModal(
         maxLength: 5000
     });
 
+    const uploadHeading = createElement("h3", "presentation-upload-heading", "Projektdateien");
+    const uploadHelp = createElement(
+        "p",
+        "upload-help",
+        "Füge Präsentationen, PDFs, Bilder oder weitere Materialien hinzu. Du kannst mehrere Dateien auswählen."
+    );
+    const uploadArea = createElement("div", "presentation-upload-area");
+    const fileInput = document.createElement("input");
+    fileInput.type = "file";
+    fileInput.multiple = true;
+    fileInput.accept = "image/*,video/*,audio/*,application/*,text/*,.ppt,.pptx,.pptm,.potx,.potm,.pps,.ppsx,.ppsm,.odp,.key,.odt,.ods,.odg";
+    fileInput.tabIndex = -1;
+    fileInput.setAttribute("aria-label", "Präsentations- und Projektdateien auswählen");
+    fileInput.className = "visually-hidden-file-input";
+
+    const pickerButton = createElement(
+        "button",
+        "primary-button upload-picker presentation-file-picker",
+        "Dateien auswählen"
+    );
+    pickerButton.type = "button";
+    if (focusUpload || !isEditing) {
+        pickerButton.dataset.initialFocus = "true";
+    }
+
+    const dropHint = createElement("span", "upload-drop-hint", "oder Dateien hier ablegen");
+    const selectedList = createElement("ul", "selected-files presentation-selected-files");
+    selectedList.setAttribute("aria-label", "Ausgewählte Projektdateien");
+    const uploadStatus = createElement("p", "upload-status");
+    uploadStatus.setAttribute("role", "status");
+    const selections = [];
+    const existingFiles = (existingPresentation?.fileIds ?? [])
+        .map(id => getFiles().find(file => file.id === id))
+        .filter(Boolean);
+    const renderSelections = () => {
+        selectedList.replaceChildren();
+
+        existingFiles.forEach(file => {
+            const row = createElement("li", "selected-file-row");
+            const details = createElement("span", "selected-file-summary");
+            details.appendChild(createElement(
+                "span",
+                "selected-file-icon",
+                getFileTypeLabel(file)
+            ));
+            details.appendChild(createElement(
+                "span",
+                "",
+                `${file.name} · ${formatFileSize(file.size)} · bereits angehängt`
+            ));
+            row.appendChild(details);
+            selectedList.appendChild(row);
+        });
+
+        selections.forEach((selection, index) => {
+            const row = createElement("li", "selected-file-row");
+            const summary = createElement("div", "selected-file-summary");
+            if (selection.previewUrl) {
+                const image = createElement("img", "selected-file-thumbnail");
+                image.src = selection.previewUrl;
+                image.alt = `Vorschau: ${selection.file.name}`;
+                summary.appendChild(image);
+            } else {
+                summary.appendChild(createElement(
+                    "span",
+                    "selected-file-icon",
+                    getFileTypeLabel(selection.file)
+                ));
+            }
+            summary.appendChild(createElement(
+                "span",
+                "",
+                `${selection.file.name} · ${formatFileSize(selection.file.size)}`
+            ));
+            const state = createElement("span", "selected-file-status", selection.status);
+            const removeButton = createActionButton("Entfernen");
+            removeButton.setAttribute("aria-label", `${selection.file.name} aus der Auswahl entfernen`);
+            removeButton.addEventListener("click", () => {
+                URL.revokeObjectURL(selection.previewUrl);
+                selectionPreviewUrls = selectionPreviewUrls.filter(url => url !== selection.previewUrl);
+                selections.splice(index, 1);
+                renderSelections();
+            });
+            row.append(summary, state, removeButton);
+            selectedList.appendChild(row);
+        });
+    };
+
+    const addSelections = files => {
+        selections.push(...files.map(file => createFileSelection(file, renderSelections)));
+        const titleInput = titleField.querySelector("input");
+        if (!titleInput.value.trim() && files.length > 0) {
+            titleInput.value = files[0].name.replace(/\.[^.]+$/, "");
+        }
+        renderSelections();
+    };
+
+    pickerButton.addEventListener("click", () => fileInput.click());
+    fileInput.addEventListener("change", () => {
+        addSelections(Array.from(fileInput.files ?? []));
+        fileInput.value = "";
+    });
+    uploadArea.addEventListener("dragover", event => {
+        event.preventDefault();
+        uploadArea.classList.add("dragging");
+    });
+    uploadArea.addEventListener("dragleave", event => {
+        if (!uploadArea.contains(event.relatedTarget)) {
+            uploadArea.classList.remove("dragging");
+        }
+    });
+    uploadArea.addEventListener("drop", event => {
+        event.preventDefault();
+        uploadArea.classList.remove("dragging");
+        if (event.dataTransfer?.files.length) {
+            addSelections(Array.from(event.dataTransfer.files));
+        }
+    });
+
+    uploadArea.setAttribute("role", "region");
+    uploadArea.setAttribute("aria-label", "Präsentations- und Projektdateien auswählen oder hier ablegen");
+    uploadArea.append(pickerButton, fileInput, dropHint);
+    renderSelections();
+
     form.append(
         titleField,
         subjectField,
         dateField,
-        descriptionField
+        descriptionField,
+        uploadHeading,
+        uploadHelp,
+        uploadArea,
+        selectedList,
+        uploadStatus
     );
 
     openModal({
         title: isEditing
-            ? "Präsentation bearbeiten"
-            : "Neue Präsentation",
+            ? "Projekt bearbeiten"
+            : "Neues Präsentationsprojekt",
 
         content: form,
+        submitText: isEditing ? "Änderungen speichern" : "Projekt speichern",
+        onClose: () => {
+            selections.forEach(selection => {
+                URL.revokeObjectURL(selection.previewUrl);
+                selectionPreviewUrls = selectionPreviewUrls.filter(url => url !== selection.previewUrl);
+            });
+            selections.length = 0;
+        },
 
-        onSubmit: () => {
+        onSubmit: async () => {
             const title =
                 titleField.querySelector(
                     "input"
@@ -939,31 +1118,79 @@ function openPresentationModal(
                     "textarea"
                 ).value.trim();
 
-            if (isEditing) {
-                updatePresentation(
-                    existingPresentation.id,
-                    {
+            const storedFiles = [];
+            try {
+                for (let index = 0; index < selections.length; index += 1) {
+                    const selection = selections[index];
+                    uploadStatus.textContent = `Datei ${index + 1} von ${selections.length} wird gespeichert …`;
+                    selection.status = "Wird gespeichert …";
+                    renderSelections();
+                    const id = crypto.randomUUID();
+                    try {
+                        await storeFile(id, selection.file);
+                        addFile(
+                            selection.file.name,
+                            getFileTypeLabel(selection.file),
+                            subject,
+                            "",
+                            {
+                                id,
+                                mimeType: selection.file.type || inferMimeType({ name: selection.file.name }),
+                                size: selection.file.size
+                            }
+                        );
+                    } catch (uploadError) {
+                        try {
+                            await removeStoredFile(id);
+                        } catch (cleanupError) {
+                            console.error("[Schulorganizer] Unvollständige Projektdatei konnte nicht bereinigt werden:", cleanupError);
+                        }
+                        selection.status = "Fehlgeschlagen";
+                        renderSelections();
+                        throw uploadError;
+                    }
+                    storedFiles.push(id);
+                    selection.status = "Hochgeladen";
+                    renderSelections();
+                }
+
+                const fileIds = [
+                    ...(existingPresentation?.fileIds ?? []),
+                    ...storedFiles
+                ];
+
+                if (isEditing) {
+                    updatePresentation(existingPresentation.id, {
                         title,
                         subject,
                         date,
-                        description
+                        description,
+                        fileIds
+                    });
+                    success("Projekt aktualisiert.");
+                } else {
+                    addPresentation(title, subject, date, description, {
+                        fileIds
+                    });
+                    success("Präsentationsprojekt erstellt.");
+                }
+            } catch (saveError) {
+                for (const id of storedFiles) {
+                    try {
+                        await removeStoredFile(id);
+                        deleteFile(id);
+                    } catch (cleanupError) {
+                        console.error("[Schulorganizer] Nicht gespeicherte Projektdatei konnte nicht bereinigt werden:", cleanupError);
                     }
-                );
-
-                success(
-                    "Präsentation aktualisiert."
-                );
-            } else {
-                addPresentation(
-                    title,
-                    subject,
-                    date,
-                    description
-                );
-
-                success(
-                    "Präsentation hinzugefügt."
-                );
+                }
+                selections.forEach(selection => {
+                    if (selection.status === "Hochgeladen") {
+                        selection.status = "Ausgewählt";
+                    }
+                });
+                uploadStatus.textContent = "Speichern fehlgeschlagen. Deine Dateiauswahl ist noch vorhanden.";
+                renderSelections();
+                throw saveError;
             }
 
             closeModal();
@@ -1359,8 +1586,19 @@ function inferMimeType(file) {
         docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         ppt: "application/vnd.ms-powerpoint",
         pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        pptm: "application/vnd.ms-powerpoint.presentation.macroEnabled.12",
+        potx: "application/vnd.openxmlformats-officedocument.presentationml.template",
+        potm: "application/vnd.ms-powerpoint.template.macroEnabled.12",
+        pps: "application/vnd.ms-powerpoint",
+        ppsx: "application/vnd.openxmlformats-officedocument.presentationml.slideshow",
+        ppsm: "application/vnd.ms-powerpoint.slideshow.macroEnabled.12",
+        odp: "application/vnd.oasis.opendocument.presentation",
+        key: "application/vnd.apple.keynote",
         xls: "application/vnd.ms-excel",
         xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ods: "application/vnd.oasis.opendocument.spreadsheet",
+        odt: "application/vnd.oasis.opendocument.text",
+        odg: "application/vnd.oasis.opendocument.graphics",
         txt: "text/plain"
     };
 
@@ -1396,6 +1634,11 @@ const previewObserver = new IntersectionObserver(entries => {
             entry.target.src = url;
         } catch (previewError) {
             console.error("[Schulorganizer] Dateivorschau fehlgeschlagen:", previewError);
+            if (entry.target.isConnected) {
+                const filename = entry.target.alt.replace(/^Vorschau: /, "");
+                entry.target.alt = `Vorschau nicht verfügbar: ${filename}`;
+                entry.target.classList.add("preview-unavailable");
+            }
         }
     });
 });
@@ -1446,7 +1689,7 @@ function createFilePreview(file) {
                 ? "PDF"
                 : type.startsWith("video/")
                     ? "Video"
-                    : type.includes("presentation") || /\.(ppt|pptx)$/i.test(file.name)
+                    : type.includes("presentation") || /\.(ppt|pptx|pptm|potx|potm|pps|ppsx|ppsm|odp|key)$/i.test(file.name)
                         ? "PPT"
                         : type.includes("word") || /\.(doc|docx)$/i.test(file.name)
                             ? "DOC"
@@ -1483,11 +1726,18 @@ async function openStoredFile(file) {
             const image = createElement("img", "file-viewer-image");
             image.src = url;
             image.alt = file.name;
+            image.addEventListener("error", () => {
+                image.replaceWith(createElement(
+                    "p",
+                    "file-viewer-message",
+                    "Dieses Bildformat kann in diesem Browser nicht direkt angezeigt werden. Du kannst die Originaldatei herunterladen."
+                ));
+            }, { once: true });
             focusTarget = image;
             viewer.appendChild(image);
         } else if (type === "application/pdf") {
             const document = createElement("iframe", "file-viewer-document");
-            document.src = url;
+            document.src = `${url}#toolbar=1&navpanes=0&view=FitH`;
             document.title = file.name;
             focusTarget = document;
             viewer.appendChild(document);
@@ -1534,6 +1784,25 @@ async function openStoredFile(file) {
         if (focusTarget) {
             focusTarget.setAttribute("data-initial-focus", "true");
             focusTarget.setAttribute("tabindex", "0");
+            const viewerToolbar = createElement("div", "file-viewer-toolbar");
+            const fullscreenButton = createElement("button", "secondary-button", "Vollbild");
+            fullscreenButton.type = "button";
+            fullscreenButton.addEventListener("click", async () => {
+                try {
+                    if (document.fullscreenElement) {
+                        await document.exitFullscreen();
+                    } else if (viewer.requestFullscreen) {
+                        await viewer.requestFullscreen();
+                    } else {
+                        error("Der Vollbildmodus wird von diesem Browser nicht unterstützt.");
+                    }
+                } catch (fullscreenError) {
+                    console.error("[Schulorganizer] Vollbildmodus konnte nicht geöffnet werden:", fullscreenError);
+                    error("Der Vollbildmodus konnte nicht geöffnet werden.");
+                }
+            });
+            viewerToolbar.appendChild(fullscreenButton);
+            viewer.prepend(viewerToolbar);
         } else {
             viewer.tabIndex = -1;
             viewer.setAttribute("data-initial-focus", "true");
@@ -1960,6 +2229,10 @@ function createFileSelection(file, onPreviewReady = () => {}) {
 }
 
 function getFileTypeLabel(file) {
+    if (["PDF", "Bild", "Video", "Audio", "Präsentation", "Dokument", "Textdatei", "Sonstiges"].includes(file.type)) {
+        return file.type;
+    }
+
     const mime = file.type || inferMimeType({ name: file.name });
     if (mime === "application/pdf") return "PDF";
     if (mime.startsWith("image/")) return "Bild";
@@ -1968,6 +2241,9 @@ function getFileTypeLabel(file) {
     if (mime.includes("presentation")) return "Präsentation";
     if (mime.includes("word") || mime.includes("document")) return "Dokument";
     if (mime.startsWith("text/")) return "Textdatei";
+    if (/\.(ppt|pptx|pptm|potx|potm|pps|ppsx|ppsm|odp|key)$/i.test(file.name)) return "Präsentation";
+    if (/\.(doc|docx|odt|xls|xlsx|ods|odg|rtf)$/i.test(file.name)) return "Dokument";
+    if (/\.pdf$/i.test(file.name)) return "PDF";
     return "Sonstiges";
 }
 
@@ -2160,6 +2436,14 @@ addButton.addEventListener("click", () => {
     if (!addMenu.hidden) {
         addMenu.querySelector("[role='menuitem']")?.focus();
     }
+});
+
+addPresentationProjectButton.addEventListener("click", () => {
+    openPresentationModal();
+});
+
+uploadPresentationButton.addEventListener("click", () => {
+    openPresentationModal(null, { focusUpload: true });
 });
 
 addMenu.querySelectorAll("[data-add-type]").forEach(button => {

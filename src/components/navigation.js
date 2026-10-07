@@ -17,7 +17,7 @@ const pages = {
     presentations: {
         title: "Präsentationen",
         description:
-            "Speichere und verwalte deine Präsentationen."
+            "Plane Referate und verwalte Präsentationen mit allen Projektdateien."
     },
 
     notes: {
