@@ -1,8 +1,26 @@
-import { loadData, saveData } from "../save.js";
+import {
+    loadData,
+    saveData,
+    reportStorageIssue
+} from "../save.js";
 
 const STORAGE_KEY = "subjects";
 
-let subjects = loadData(STORAGE_KEY, []);
+const storedSubjects = loadData(STORAGE_KEY, []);
+const validSubjects = storedSubjects.filter(
+    subject => typeof subject.name === "string" && subject.name.trim()
+);
+if (validSubjects.length !== storedSubjects.length) {
+    reportStorageIssue("Einige fehlerhafte Fächer wurden übersprungen.");
+}
+let subjects = validSubjects.map(subject => ({
+    ...subject,
+    id: subject.id ?? crypto.randomUUID(),
+    name: subject.name.trim(),
+    createdAt: typeof subject.createdAt === "number"
+        ? subject.createdAt
+        : Date.now()
+}));
 
 export function getSubjects() {
     return subjects;
@@ -32,16 +50,26 @@ export function addSubject(name) {
     };
 
     subjects.push(subject);
-
-    saveData(STORAGE_KEY, subjects);
+    try {
+        saveData(STORAGE_KEY, subjects);
+    } catch (error) {
+        subjects.pop();
+        throw error;
+    }
 
     return subject;
 }
 
 export function deleteSubject(id) {
+    const previousSubjects = subjects;
     subjects = subjects.filter(
         subject => subject.id !== id
     );
 
-    saveData(STORAGE_KEY, subjects);
+    try {
+        saveData(STORAGE_KEY, subjects);
+    } catch (error) {
+        subjects = previousSubjects;
+        throw error;
+    }
 }

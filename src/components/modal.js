@@ -17,6 +17,7 @@ const modalSubmit =
     document.querySelector("#modalSubmit");
 
 let submitHandler = null;
+let closeHandler = null;
 let isSubmitting = false;
 
 let previouslyFocusedElement = null;
@@ -41,6 +42,7 @@ export function openModal({
     title = "Dialog",
     content,
     onSubmit = null,
+    onClose = null,
     submitText = "Speichern",
     cancelText = "Abbrechen"
 }) {
@@ -68,6 +70,7 @@ export function openModal({
         cancelText;
 
     submitHandler = onSubmit;
+    closeHandler = onClose;
 
     isSubmitting = false;
 
@@ -84,14 +87,14 @@ export function openModal({
         "modal-open"
     );
 
-    requestAnimationFrame(() => {
-        const firstInput =
-            modalBody.querySelector(
-                "input:not([type='hidden']), textarea, select"
-            );
+    const initialFocus =
+        modalBody.querySelector("[data-initial-focus]");
+    const firstInput =
+        modalBody.querySelector(
+            "input:not([type='hidden']):not([tabindex='-1']), textarea, select"
+        );
 
-        firstInput?.focus();
-    });
+    (initialFocus ?? firstInput ?? modal.querySelector(".modal-content"))?.focus();
 }
 
 
@@ -100,6 +103,8 @@ export function closeModal() {
         return;
     }
 
+    const onClose = closeHandler;
+    closeHandler = null;
     modal.classList.remove("visible");
 
     modal.setAttribute(
@@ -128,6 +133,7 @@ export function closeModal() {
     }
 
     previouslyFocusedElement = null;
+    onClose?.();
 }
 
 
@@ -160,16 +166,30 @@ export async function submitModal() {
 
     try {
         await submitHandler();
+        if (modal?.classList.contains("visible")) {
+            isSubmitting = false;
+            setSubmitState(true);
+        }
     } catch (error) {
         console.error(
             "[Schulorganizer] Modal submit error:",
             error
         );
+        notifyModalError();
 
         isSubmitting = false;
 
         setSubmitState(true);
     }
+}
+
+function notifyModalError() {
+    const message = document.createElement("p");
+    message.className = "modal-error-message";
+    message.setAttribute("role", "alert");
+    message.textContent = "Die Änderung konnte nicht gespeichert werden. Bitte erneut versuchen.";
+    modalBody.querySelector(".modal-error-message")?.remove();
+    modalBody.prepend(message);
 }
 
 
@@ -227,6 +247,38 @@ modal?.addEventListener(
 document.addEventListener(
     "keydown",
     event => {
+        if (
+            event.key === "Tab" &&
+            modal?.classList.contains("visible")
+        ) {
+            const focusable = [
+                ...modal.querySelectorAll(
+                    "button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href]"
+                )
+            ].filter(element =>
+                element.tabIndex >= 0 &&
+                element.offsetParent !== null
+            );
+            const first = focusable[0];
+            const last = focusable.at(-1);
+
+            if (
+                event.shiftKey &&
+                document.activeElement === first
+            ) {
+                event.preventDefault();
+                last?.focus();
+            } else if (
+                !event.shiftKey &&
+                document.activeElement === last
+            ) {
+                event.preventDefault();
+                first?.focus();
+            }
+
+            return;
+        }
+
         if (
             event.key === "Escape" &&
             modal?.classList.contains(
@@ -299,6 +351,13 @@ export function createField({
 
     labelText.textContent = label;
 
+    if (required) {
+        const marker = document.createElement("span");
+        marker.textContent = " *";
+        marker.setAttribute("aria-hidden", "true");
+        labelText.appendChild(marker);
+    }
+
     let input;
 
     if (type === "textarea") {
@@ -326,6 +385,9 @@ export function createField({
 
     input.required =
         required;
+    if (required) {
+        input.setAttribute("aria-required", "true");
+    }
 
     if (
         minLength !== undefined

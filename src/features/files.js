@@ -12,19 +12,28 @@ export function addFile(
     name,
     type = "",
     subject = "",
-    url = ""
+    url = "",
+    details = {}
 ) {
     const file = {
-        id: crypto.randomUUID(),
+        id: details.id ?? crypto.randomUUID(),
         name,
         type,
         subject,
         url,
+        mimeType: details.mimeType ?? "",
+        size: details.size ?? null,
         createdAt: Date.now()
     };
 
     files.push(file);
-    saveData(STORAGE_KEY, files);
+
+    try {
+        saveData(STORAGE_KEY, files);
+    } catch (error) {
+        files = files.filter(item => item.id !== file.id);
+        throw error;
+    }
 
     return file;
 }
@@ -38,17 +47,29 @@ export function updateFile(id, changes) {
         return null;
     }
 
+    const previous = { ...file };
     Object.assign(file, changes);
 
-    saveData(STORAGE_KEY, files);
+    try {
+        saveData(STORAGE_KEY, files);
+    } catch (error) {
+        Object.assign(file, previous);
+        throw error;
+    }
 
     return file;
 }
 
 export function deleteFile(id) {
+    const previousFiles = files;
     files = files.filter(
         item => item.id !== id
     );
 
-    saveData(STORAGE_KEY, files);
+    try {
+        saveData(STORAGE_KEY, files);
+    } catch (error) {
+        files = previousFiles;
+        throw error;
+    }
 }

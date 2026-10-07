@@ -24,7 +24,12 @@ export function addPresentation(
     };
 
     presentations.push(presentation);
-    saveData(STORAGE_KEY, presentations);
+    try {
+        saveData(STORAGE_KEY, presentations);
+    } catch (error) {
+        presentations.pop();
+        throw error;
+    }
 
     return presentation;
 }
@@ -38,17 +43,28 @@ export function updatePresentation(id, changes) {
         return null;
     }
 
+    const previous = { ...presentation };
     Object.assign(presentation, changes);
-
-    saveData(STORAGE_KEY, presentations);
+    try {
+        saveData(STORAGE_KEY, presentations);
+    } catch (error) {
+        Object.assign(presentation, previous);
+        throw error;
+    }
 
     return presentation;
 }
 
 export function deletePresentation(id) {
+    const previousPresentations = presentations;
     presentations = presentations.filter(
         item => item.id !== id
     );
 
-    saveData(STORAGE_KEY, presentations);
+    try {
+        saveData(STORAGE_KEY, presentations);
+    } catch (error) {
+        presentations = previousPresentations;
+        throw error;
+    }
 }

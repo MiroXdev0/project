@@ -22,7 +22,12 @@ export function addNote(
     };
 
     notes.push(note);
-    saveData(STORAGE_KEY, notes);
+    try {
+        saveData(STORAGE_KEY, notes);
+    } catch (error) {
+        notes.pop();
+        throw error;
+    }
 
     return note;
 }
@@ -36,17 +41,28 @@ export function updateNote(id, changes) {
         return null;
     }
 
+    const previous = { ...note };
     Object.assign(note, changes);
-
-    saveData(STORAGE_KEY, notes);
+    try {
+        saveData(STORAGE_KEY, notes);
+    } catch (error) {
+        Object.assign(note, previous);
+        throw error;
+    }
 
     return note;
 }
 
 export function deleteNote(id) {
+    const previousNotes = notes;
     notes = notes.filter(
         item => item.id !== id
     );
 
-    saveData(STORAGE_KEY, notes);
+    try {
+        saveData(STORAGE_KEY, notes);
+    } catch (error) {
+        notes = previousNotes;
+        throw error;
+    }
 }

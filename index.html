@@ -130,10 +130,22 @@
                     id="addButton"
                     class="primary-button"
                     type="button"
+                    aria-haspopup="true"
+                    aria-expanded="false"
+                    aria-controls="addMenu"
                 >
                     <span>+</span>
                     <span>Hinzufügen</span>
                 </button>
+
+                <div id="addMenu" class="add-menu" role="menu" hidden>
+                    <button type="button" role="menuitem" data-add-type="tasks">Aufgabe hinzufügen</button>
+                    <button type="button" role="menuitem" data-add-type="presentations">Präsentation hinzufügen</button>
+                    <button type="button" role="menuitem" data-add-type="notes">Notiz hinzufügen</button>
+                    <button type="button" role="menuitem" data-add-type="files">Datei hochladen</button>
+                    <button type="button" role="menuitem" data-add-type="fileLink">Datei-Link hinzufügen</button>
+                    <button type="button" role="menuitem" data-add-type="subjects">Fach hinzufügen</button>
+                </div>
 
             </div>
 
@@ -148,7 +160,7 @@
 
             <div class="dashboard-grid">
 
-                <article class="dashboard-card">
+                <button class="dashboard-card dashboard-link" type="button" data-dashboard-page="tasks" aria-label="Zu den Aufgaben">
 
                     <div class="card-top">
                         <span class="card-label">
@@ -168,10 +180,10 @@
                         offene Aufgaben
                     </span>
 
-                </article>
+                </button>
 
 
-                <article class="dashboard-card">
+                <button class="dashboard-card dashboard-link" type="button" data-dashboard-page="presentations" aria-label="Zu den Präsentationen">
 
                     <div class="card-top">
                         <span class="card-label">
@@ -191,10 +203,10 @@
                         gespeichert
                     </span>
 
-                </article>
+                </button>
 
 
-                <article class="dashboard-card">
+                <button class="dashboard-card dashboard-link" type="button" data-dashboard-page="notes" aria-label="Zu den Notizen">
 
                     <div class="card-top">
                         <span class="card-label">
@@ -214,10 +226,10 @@
                         gespeichert
                     </span>
 
-                </article>
+                </button>
 
 
-                <article class="dashboard-card">
+                <button class="dashboard-card dashboard-link" type="button" data-dashboard-page="files" aria-label="Zu den Dateien">
 
                     <div class="card-top">
                         <span class="card-label">
@@ -237,7 +249,16 @@
                         gespeichert
                     </span>
 
-                </article>
+                </button>
+
+                <button class="dashboard-card dashboard-link" type="button" data-dashboard-page="subjects" aria-label="Zu den Fächern">
+                    <div class="card-top">
+                        <span class="card-label">Fächer</span>
+                        <span class="card-icon" aria-hidden="true">◈</span>
+                    </div>
+                    <strong id="subjectCount">0</strong>
+                    <span class="card-description">organisiert</span>
+                </button>
 
             </div>
 
@@ -289,6 +310,10 @@
                         Verwalte deine schulischen Aufgaben.
                     </p>
                 </div>
+                <label class="subject-filter-field">
+                    <span>Nach Fach filtern</span>
+                    <select id="taskSubjectFilter" aria-label="Aufgaben nach Fach filtern"></select>
+                </label>
 
             </div>
 
@@ -321,6 +346,10 @@
                         Plane und verwalte deine Präsentationen.
                     </p>
                 </div>
+                <label class="subject-filter-field">
+                    <span>Nach Fach filtern</span>
+                    <select id="presentationSubjectFilter" aria-label="Präsentationen nach Fach filtern"></select>
+                </label>
 
             </div>
 
@@ -353,6 +382,10 @@
                         Speichere wichtige Informationen und Notizen.
                     </p>
                 </div>
+                <label class="subject-filter-field">
+                    <span>Nach Fach filtern</span>
+                    <select id="noteSubjectFilter" aria-label="Notizen nach Fach filtern"></select>
+                </label>
 
             </div>
 
@@ -385,6 +418,10 @@
                         Verwalte deine schulischen Dateien.
                     </p>
                 </div>
+                <label class="subject-filter-field">
+                    <span>Nach Fach filtern</span>
+                    <select id="fileSubjectFilter" aria-label="Dateien nach Fach filtern"></select>
+                </label>
 
             </div>
 
@@ -448,6 +485,7 @@
         role="dialog"
         aria-modal="true"
         aria-labelledby="modalTitle"
+        tabindex="-1"
     >
 
         <div class="modal-header">
@@ -508,7 +546,6 @@
     type="module"
     src="/src/main.js"
 ></script>
-```
 
 </body>
 </html>

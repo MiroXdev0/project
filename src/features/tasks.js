@@ -1,8 +1,13 @@
-import { loadData, saveData } from "../save.js";
+import {
+    loadData,
+    saveData,
+    reportStorageIssue
+} from "../save.js";
 
 const STORAGE_KEY = "tasks";
 
-let tasks = loadData(STORAGE_KEY, []);
+const storedTasks = loadData(STORAGE_KEY, []);
+let tasks = storedTasks;
 
 function persist() {
     saveData(STORAGE_KEY, tasks);
@@ -39,9 +44,21 @@ function normalizeTask(task) {
 }
 
 // Make old localStorage data compatible
-tasks = tasks.map(normalizeTask);
+const validStoredTasks = tasks.filter(
+    task => task && typeof task === "object" && !Array.isArray(task)
+);
+if (validStoredTasks.length !== tasks.length) {
+    reportStorageIssue("Einige fehlerhafte Aufgabendaten wurden übersprungen.");
+}
+tasks = validStoredTasks.map(normalizeTask);
 
-persist();
+if (JSON.stringify(tasks) !== JSON.stringify(storedTasks)) {
+    try {
+        persist();
+    } catch (error) {
+        console.error("[Schulorganizer] Aufgabenmigration fehlgeschlagen:", error);
+    }
+}
 
 
 export function getTasks() {
@@ -94,8 +111,12 @@ export function addTask({
     });
 
     tasks.push(task);
-
-    persist();
+    try {
+        persist();
+    } catch (error) {
+        tasks.pop();
+        throw error;
+    }
 
     return task;
 }
@@ -124,8 +145,12 @@ export function updateTask(id, changes = {}) {
     });
 
     tasks[index] = updatedTask;
-
-    persist();
+    try {
+        persist();
+    } catch (error) {
+        tasks[index] = currentTask;
+        throw error;
+    }
 
     return updatedTask;
 }
@@ -167,20 +192,32 @@ export function deleteTask(id) {
         return false;
     }
 
+    const previousTasks = tasks;
     tasks = tasks.filter(
         task => task.id !== id
     );
 
-    persist();
+    try {
+        persist();
+    } catch (error) {
+        tasks = previousTasks;
+        throw error;
+    }
 
     return true;
 }
 
 
 export function clearTasks() {
+    const previousTasks = tasks;
     tasks = [];
 
-    persist();
+    try {
+        persist();
+    } catch (error) {
+        tasks = previousTasks;
+        throw error;
+    }
 }
 
 

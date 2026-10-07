@@ -5,7 +5,7 @@ const pages = {
     dashboard: {
         title: "Übersicht",
         description:
-            "Alles Wichtige auf einen Blick."
+            "Deine schulischen Inhalte – lokal auf diesem Gerät gespeichert."
     },
 
     tasks: {
@@ -51,7 +51,7 @@ export function getCurrentPage() {
     return currentPage;
 }
 
-export function navigateTo(pageName) {
+export function navigateTo(pageName, { replaceHistory = false } = {}) {
     if (!pages[pageName]) {
         return;
     }
@@ -74,11 +74,21 @@ export function navigateTo(pageName) {
     target?.classList.add("active-page");
 
     navigationButtons.forEach(button => {
-        button.classList.toggle(
-            "active",
-            button.dataset.page === pageName
-        );
+        const isCurrent = button.dataset.page === pageName;
+        button.classList.toggle("active", isCurrent);
+        if (isCurrent) {
+            button.setAttribute("aria-current", "page");
+        } else {
+            button.removeAttribute("aria-current");
+        }
     });
+
+    const targetUrl = `${window.location.pathname}${window.location.search}#${pageName}`;
+    if (replaceHistory) {
+        window.history.replaceState({ page: pageName }, "", targetUrl);
+    } else if (window.location.hash !== `#${pageName}`) {
+        window.history.pushState({ page: pageName }, "", targetUrl);
+    }
 
     window.dispatchEvent(
         new CustomEvent("pagechange", {
@@ -88,6 +98,13 @@ export function navigateTo(pageName) {
         })
     );
 }
+
+window.addEventListener("popstate", () => {
+    const pageName = window.location.hash.slice(1);
+    navigateTo(pages[pageName] ? pageName : "dashboard", {
+        replaceHistory: true
+    });
+});
 
 navigationButtons.forEach(button => {
     button.addEventListener("click", () => {

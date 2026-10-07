@@ -24,6 +24,8 @@ export function notify(
     notification.className =
         `notification notification-${type}`;
 
+    notification.setAttribute("role", type === "error" ? "alert" : "status");
+    notification.setAttribute("aria-live", type === "error" ? "assertive" : "polite");
     notification.textContent = message;
 
     getContainer().appendChild(

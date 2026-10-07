@@ -1,4 +1,17 @@
 const STORAGE_PREFIX = "schulorganizer_";
+const storageIssues = [];
+
+function recordStorageIssue(message) {
+    storageIssues.push(message);
+}
+
+export function reportStorageIssue(message) {
+    recordStorageIssue(message);
+}
+
+export function getStorageIssues() {
+    return storageIssues.splice(0);
+}
 
 function getKey(key) {
     return `${STORAGE_PREFIX}${key}`;
@@ -17,6 +30,7 @@ export function set(key, value) {
             "[Schulorganizer] Fehler beim Speichern:",
             error
         );
+        recordStorageIssue("Speichern im Browserspeicher fehlgeschlagen.");
 
         return false;
     }
@@ -38,6 +52,7 @@ export function get(key, fallback = null) {
             "[Schulorganizer] Fehler beim Laden:",
             error
         );
+        recordStorageIssue("Gespeicherte Inhalte konnten nicht gelesen werden.");
 
         return fallback;
     }
@@ -61,9 +76,13 @@ export function remove(key) {
 }
 
 export function exists(key) {
-    return localStorage.getItem(
-        getKey(key)
-    ) !== null;
+    try {
+        return localStorage.getItem(getKey(key)) !== null;
+    } catch (error) {
+        console.error("[Schulorganizer] Speicherzugriff fehlgeschlagen:", error);
+        recordStorageIssue("Der Browserspeicher ist nicht verfügbar.");
+        return false;
+    }
 }
 
 export function clear() {
