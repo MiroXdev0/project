@@ -1469,20 +1469,91 @@ async function openStoredFile(file) {
         return;
     }
 
-    const openedWindow = window.open("about:blank", "_blank");
-    if (!openedWindow) {
-        error("Der Browser hat das neue Fenster blockiert. Bitte Pop-ups erlauben.");
-        return;
-    }
-
     try {
         const blob = await readFile(file.id);
         if (!blob) throw new Error("Dateiinhalt fehlt.");
         const url = URL.createObjectURL(blob);
         activePreviewUrls.push(url);
-        openedWindow.location.href = url;
+
+        const type = inferMimeType(file);
+        const viewer = createElement("div", "file-viewer");
+        let focusTarget = null;
+
+        if (type.startsWith("image/")) {
+            const image = createElement("img", "file-viewer-image");
+            image.src = url;
+            image.alt = file.name;
+            focusTarget = image;
+            viewer.appendChild(image);
+        } else if (type === "application/pdf") {
+            const document = createElement("iframe", "file-viewer-document");
+            document.src = url;
+            document.title = file.name;
+            focusTarget = document;
+            viewer.appendChild(document);
+        } else if (type.startsWith("video/")) {
+            const video = createElement("video", "file-viewer-media");
+            video.src = url;
+            video.controls = true;
+            video.playsInline = true;
+            video.preload = "metadata";
+            focusTarget = video;
+            viewer.appendChild(video);
+        } else if (type.startsWith("audio/")) {
+            const audio = createElement("audio", "file-viewer-media");
+            audio.src = url;
+            audio.controls = true;
+            audio.preload = "metadata";
+            focusTarget = audio;
+            viewer.appendChild(audio);
+        } else if (
+            type.startsWith("text/") ||
+            type === "application/json" ||
+            type === "application/xml"
+        ) {
+            if (blob.size > 2 * 1024 * 1024) {
+                viewer.appendChild(createElement(
+                    "p",
+                    "file-viewer-message",
+                    "Diese Textdatei ist zu groß für die integrierte Vorschau. Du kannst sie herunterladen."
+                ));
+            } else {
+                const text = createElement("pre", "file-viewer-text", await blob.text());
+                text.tabIndex = 0;
+                focusTarget = text;
+                viewer.appendChild(text);
+            }
+        } else {
+            viewer.appendChild(createElement(
+                "p",
+                "file-viewer-message",
+                "Für diesen Dateityp gibt es keine integrierte Vorschau. Du kannst die Datei herunterladen."
+            ));
+        }
+
+        if (focusTarget) {
+            focusTarget.setAttribute("data-initial-focus", "true");
+            focusTarget.setAttribute("tabindex", "0");
+        } else {
+            viewer.tabIndex = -1;
+            viewer.setAttribute("data-initial-focus", "true");
+        }
+
+        openModal({
+            title: file.name,
+            content: viewer,
+            submitText: "Herunterladen",
+            cancelText: "Schließen",
+            onSubmit: async () => {
+                await downloadStoredFile(file);
+                closeModal();
+            },
+            onClose: () => {
+                URL.revokeObjectURL(url);
+                activePreviewUrls = activePreviewUrls.filter(item => item !== url);
+            }
+        });
     } catch (openError) {
-        openedWindow.close();
         console.error("[Schulorganizer] Datei konnte nicht geöffnet werden:", openError);
         error("Diese Datei ist nicht verfügbar. Lade sie erneut hoch oder entferne den Eintrag.");
     }

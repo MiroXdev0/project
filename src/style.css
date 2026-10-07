@@ -1459,6 +1459,68 @@ body.modal-open {
     background: var(--surface-soft);
 }
 
+.modal-content:has(.file-viewer) {
+    width: min(100%, 1040px);
+    max-height: calc(100dvh - 48px);
+}
+
+.modal-body:has(.file-viewer) {
+    min-height: 0;
+    padding: 12px;
+}
+
+.file-viewer {
+    display: grid;
+    min-height: 120px;
+    max-height: calc(100dvh - 160px);
+    place-items: center;
+    overflow: auto;
+    border-radius: var(--radius-small);
+    background: var(--surface-soft);
+}
+
+.file-viewer-image {
+    display: block;
+    max-width: 100%;
+    max-height: calc(100dvh - 190px);
+    object-fit: contain;
+}
+
+.file-viewer-document {
+    display: block;
+    width: 100%;
+    height: min(72dvh, 760px);
+    border: 0;
+    background: var(--surface);
+}
+
+.file-viewer-media {
+    display: block;
+    width: min(100%, 900px);
+    max-height: calc(100dvh - 190px);
+}
+
+.file-viewer-text {
+    width: 100%;
+    max-height: calc(100dvh - 190px);
+    margin: 0;
+    padding: 20px;
+    overflow: auto;
+    color: var(--text);
+    font: 14px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.file-viewer-message {
+    max-width: 520px;
+    margin: 0;
+    padding: 24px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+    text-align: center;
+}
+
 .file-thumbnail {
     width: 100%;
     height: 100%;
