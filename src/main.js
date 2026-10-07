@@ -1715,6 +1715,11 @@ async function openStoredFile(file) {
     try {
         const blob = await readFile(file.id);
         if (!blob) throw new Error("Dateiinhalt fehlt.");
+        if (/\.pptx$/i.test(file.name) || file.mimeType === "application/vnd.openxmlformats-officedocument.presentationml.presentation") {
+            openPowerPointViewer(file, blob);
+            return;
+        }
+
         const url = URL.createObjectURL(blob);
         activePreviewUrls.push(url);
 
@@ -1826,6 +1831,146 @@ async function openStoredFile(file) {
         console.error("[Schulorganizer] Datei konnte nicht geöffnet werden:", openError);
         error("Diese Datei ist nicht verfügbar. Lade sie erneut hoch oder entferne den Eintrag.");
     }
+}
+
+function openPowerPointViewer(file, blob) {
+    const shell = createElement("div", "pptx-viewer-shell");
+    const toolbar = createElement("div", "pptx-viewer-controls");
+    const previousButton = createActionButton("Zurück");
+    previousButton.setAttribute("aria-label", "Vorherige Folie");
+    const slideCounter = createElement("span", "pptx-slide-counter", "Präsentation wird geladen …");
+    slideCounter.setAttribute("role", "status");
+    const nextButton = createActionButton("Weiter");
+    nextButton.setAttribute("aria-label", "Nächste Folie");
+    const fullscreenButton = createActionButton("Vollbild");
+    const stage = createElement("div", "pptx-slide-stage");
+    stage.tabIndex = 0;
+    stage.setAttribute("aria-label", `Folienvorschau: ${file.name}`);
+    const message = createElement("p", "file-viewer-message pptx-viewer-message");
+    const controller = new AbortController();
+    let presentationViewer = null;
+    let slideIndex = 0;
+    let isRendering = false;
+    let pointerStart = null;
+
+    previousButton.disabled = true;
+    nextButton.disabled = true;
+    toolbar.append(previousButton, slideCounter, nextButton, fullscreenButton);
+    shell.append(toolbar, stage, message);
+
+    const updateControls = () => {
+        const slideCount = presentationViewer?.slideCount ?? 0;
+        slideCounter.textContent = slideCount > 0
+            ? `Folie ${slideIndex + 1} von ${slideCount}`
+            : "Keine Folien gefunden";
+        previousButton.disabled = isRendering || slideIndex <= 0;
+        nextButton.disabled = isRendering || slideIndex >= slideCount - 1;
+    };
+
+    const showSlide = async index => {
+        if (!presentationViewer || isRendering || index < 0 || index >= presentationViewer.slideCount) {
+            return;
+        }
+
+        isRendering = true;
+        slideIndex = index;
+        updateControls();
+        message.textContent = "";
+
+        try {
+            await presentationViewer.renderSlide(index);
+        } catch (renderError) {
+            console.error("[Schulorganizer] PPTX-Folie konnte nicht dargestellt werden:", renderError);
+            message.textContent = `Folie ${index + 1} konnte nicht dargestellt werden. Die Originaldatei kann weiterhin heruntergeladen werden.`;
+        } finally {
+            isRendering = false;
+            updateControls();
+        }
+    };
+
+    previousButton.addEventListener("click", () => showSlide(slideIndex - 1));
+    nextButton.addEventListener("click", () => showSlide(slideIndex + 1));
+    fullscreenButton.addEventListener("click", async () => {
+        try {
+            if (document.fullscreenElement) {
+                await document.exitFullscreen();
+            } else if (shell.requestFullscreen) {
+                await shell.requestFullscreen();
+            } else {
+                error("Der Vollbildmodus wird von diesem Browser nicht unterstützt.");
+            }
+        } catch (fullscreenError) {
+            console.error("[Schulorganizer] PPTX-Vollbild konnte nicht geöffnet werden:", fullscreenError);
+            error("Der Vollbildmodus konnte nicht geöffnet werden.");
+        }
+    });
+    stage.addEventListener("pointerdown", event => {
+        pointerStart = event.clientX;
+    });
+    stage.addEventListener("pointerup", event => {
+        if (pointerStart === null) return;
+        const distance = event.clientX - pointerStart;
+        pointerStart = null;
+        if (Math.abs(distance) < 48) return;
+        showSlide(slideIndex + (distance < 0 ? 1 : -1));
+    });
+    stage.addEventListener("keydown", event => {
+        if (event.key === "ArrowLeft") {
+            event.preventDefault();
+            showSlide(slideIndex - 1);
+        } else if (event.key === "ArrowRight") {
+            event.preventDefault();
+            showSlide(slideIndex + 1);
+        }
+    });
+
+    openModal({
+        title: file.name,
+        content: shell,
+        submitText: "Original herunterladen",
+        cancelText: "Schließen",
+        onSubmit: () => downloadStoredFile(file),
+        onClose: () => {
+            controller.abort();
+            presentationViewer?.destroy();
+        }
+    });
+
+    import("@aiden0z/pptx-renderer")
+        .then(async ({ PptxViewer, RECOMMENDED_ZIP_LIMITS }) => {
+            if (controller.signal.aborted) return;
+            try {
+                presentationViewer = await PptxViewer.open(blob, stage, {
+                    renderMode: "slide",
+                    fitMode: "contain",
+                    lazyMedia: true,
+                    lazySlides: true,
+                    zipLimits: RECOMMENDED_ZIP_LIMITS,
+                    signal: controller.signal
+                });
+                if (controller.signal.aborted) {
+                    presentationViewer.destroy();
+                    presentationViewer = null;
+                    return;
+                }
+                slideIndex = 0;
+                updateControls();
+                stage.focus();
+            } catch (previewError) {
+                if (controller.signal.aborted) return;
+                console.error("[Schulorganizer] PPTX-Vorschau konnte nicht geladen werden:", previewError);
+                slideCounter.textContent = "Vorschau nicht verfügbar";
+                previousButton.disabled = true;
+                nextButton.disabled = true;
+                message.textContent = "Diese Präsentation konnte nicht dargestellt werden. Die Originaldatei bleibt erhalten und kann heruntergeladen werden.";
+            }
+        })
+        .catch(previewError => {
+            if (controller.signal.aborted) return;
+            console.error("[Schulorganizer] PowerPoint-Vorschau konnte nicht geladen werden:", previewError);
+            slideCounter.textContent = "Vorschau nicht verfügbar";
+            message.textContent = "Die PowerPoint-Vorschau konnte nicht geladen werden. Die Originaldatei bleibt erhalten und kann heruntergeladen werden.";
+        });
 }
 
 async function downloadStoredFile(file) {

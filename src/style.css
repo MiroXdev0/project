@@ -1674,6 +1674,80 @@ body.modal-open {
     max-height: calc(100dvh - 72px);
 }
 
+.pptx-viewer-shell {
+    display: flex;
+    width: 100%;
+    max-height: calc(100dvh - 120px);
+    flex-direction: column;
+    gap: 10px;
+    overflow: hidden;
+    background: var(--surface-soft);
+}
+
+.pptx-viewer-controls {
+    display: flex;
+    min-height: 46px;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 4px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+}
+
+.pptx-viewer-controls .item-action {
+    min-width: 74px;
+    min-height: 42px;
+}
+
+.pptx-slide-counter {
+    min-width: 118px;
+    color: var(--text-secondary);
+    font-size: 13px;
+    text-align: center;
+}
+
+.pptx-slide-stage {
+    display: grid;
+    width: 100%;
+    min-width: 0;
+    min-height: 180px;
+    max-height: calc(100dvh - 230px);
+    flex: 1 1 auto;
+    place-items: center;
+    overflow: auto;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+    background: #e8edf4;
+}
+
+.pptx-slide-stage:focus-visible {
+    outline: 3px solid var(--primary);
+    outline-offset: -3px;
+}
+
+.pptx-slide-stage > * {
+    max-width: 100%;
+}
+
+.pptx-viewer-message {
+    margin: 0;
+    padding: 0 12px 12px;
+}
+
+.pptx-viewer-shell:fullscreen {
+    width: 100%;
+    height: 100%;
+    max-height: none;
+    padding: 12px;
+    background: #111827;
+}
+
+.pptx-viewer-shell:fullscreen .pptx-slide-stage {
+    max-height: none;
+    background: #111827;
+}
+
 .file-thumbnail {
     width: 100%;
     height: 100%;
@@ -1918,6 +1992,25 @@ body.modal-open {
     .presentation-card > .item-actions .item-action,
     .presentation-attachment-actions .item-action {
         min-height: 44px;
+    }
+
+    .pptx-viewer-controls {
+        gap: 6px;
+    }
+
+    .pptx-viewer-controls .item-action {
+        min-width: 60px;
+        min-height: 44px;
+        padding-inline: 8px;
+    }
+
+    .pptx-slide-counter {
+        min-width: 88px;
+        font-size: 12px;
+    }
+
+    .pptx-slide-stage {
+        min-height: 160px;
     }
 
     .presentation-attachment {
