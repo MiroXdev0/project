@@ -1,11 +1,12 @@
-import { loadData, saveData } from "../save.js";
-
-const STORAGE_KEY = "presentations";
-
-let presentations = loadData(STORAGE_KEY, []);
+import {
+    createSharedPresentation,
+    deleteSharedPresentation,
+    getSharedPresentations,
+    updateSharedPresentation
+} from "../data/sharedApi.js";
 
 export function getPresentations() {
-    return presentations;
+    return getSharedPresentations();
 }
 
 export function addPresentation(
@@ -15,58 +16,19 @@ export function addPresentation(
     description = "",
     details = {}
 ) {
-    const presentation = {
-        id: details.id ?? crypto.randomUUID(),
+    return createSharedPresentation({
         title,
         subject,
         date,
         description,
-        fileIds: details.fileIds ?? [],
-        createdAt: Date.now()
-    };
-
-    presentations.push(presentation);
-    try {
-        saveData(STORAGE_KEY, presentations);
-    } catch (error) {
-        presentations.pop();
-        throw error;
-    }
-
-    return presentation;
+        fileIds: details.fileIds ?? []
+    });
 }
 
 export function updatePresentation(id, changes) {
-    const presentation = presentations.find(
-        item => item.id === id
-    );
-
-    if (!presentation) {
-        return null;
-    }
-
-    const previous = { ...presentation };
-    Object.assign(presentation, changes);
-    try {
-        saveData(STORAGE_KEY, presentations);
-    } catch (error) {
-        Object.assign(presentation, previous);
-        throw error;
-    }
-
-    return presentation;
+    return updateSharedPresentation(id, changes);
 }
 
 export function deletePresentation(id) {
-    const previousPresentations = presentations;
-    presentations = presentations.filter(
-        item => item.id !== id
-    );
-
-    try {
-        saveData(STORAGE_KEY, presentations);
-    } catch (error) {
-        presentations = previousPresentations;
-        throw error;
-    }
+    return deleteSharedPresentation(id);
 }

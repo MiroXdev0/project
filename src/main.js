@@ -29,10 +29,13 @@ import {
     deleteFile
 } from "./features/files.js";
 import {
-    readFile,
-    removeStoredFile,
-    storeFile
+    readFile
 } from "./data/fileStorage.js";
+import {
+    refreshSharedData,
+    startSharedSync
+} from "./data/sharedApi.js";
+import { migrateLegacySharedData } from "./data/legacyMigration.js";
 
 import {
     getSubjects,
@@ -816,14 +819,14 @@ function createPresentationElement(
                 presentation
             ),
 
-        onDelete: () => {
+        onDelete: async () => {
             if (!confirmDelete(
                 `Möchtest du das Projekt "${presentation.title}" wirklich löschen? Die hochgeladenen Dateien bleiben im Bereich „Dateien“ erhalten.`
             )) {
                 return;
             }
 
-            deletePresentation(
+            await deletePresentation(
                 presentation.id
             );
 
@@ -1125,31 +1128,23 @@ function openPresentationModal(
                     uploadStatus.textContent = `Datei ${index + 1} von ${selections.length} wird gespeichert …`;
                     selection.status = "Wird gespeichert …";
                     renderSelections();
-                    const id = crypto.randomUUID();
                     try {
-                        await storeFile(id, selection.file);
-                        addFile(
+                        const uploadedFile = await addFile(
                             selection.file.name,
                             getFileTypeLabel(selection.file),
                             subject,
                             "",
                             {
-                                id,
-                                mimeType: selection.file.type || inferMimeType({ name: selection.file.name }),
-                                size: selection.file.size
+                                content: selection.file
                             }
                         );
+                        storedFiles.push(uploadedFile.id);
+                        selection.id = uploadedFile.id;
                     } catch (uploadError) {
-                        try {
-                            await removeStoredFile(id);
-                        } catch (cleanupError) {
-                            console.error("[Schulorganizer] Unvollständige Projektdatei konnte nicht bereinigt werden:", cleanupError);
-                        }
                         selection.status = "Fehlgeschlagen";
                         renderSelections();
                         throw uploadError;
                     }
-                    storedFiles.push(id);
                     selection.status = "Hochgeladen";
                     renderSelections();
                 }
@@ -1160,7 +1155,7 @@ function openPresentationModal(
                 ];
 
                 if (isEditing) {
-                    updatePresentation(existingPresentation.id, {
+                    await updatePresentation(existingPresentation.id, {
                         title,
                         subject,
                         date,
@@ -1169,7 +1164,7 @@ function openPresentationModal(
                     });
                     success("Projekt aktualisiert.");
                 } else {
-                    addPresentation(title, subject, date, description, {
+                    await addPresentation(title, subject, date, description, {
                         fileIds
                     });
                     success("Präsentationsprojekt erstellt.");
@@ -1177,8 +1172,7 @@ function openPresentationModal(
             } catch (saveError) {
                 for (const id of storedFiles) {
                     try {
-                        await removeStoredFile(id);
-                        deleteFile(id);
+                        await deleteFile(id);
                     } catch (cleanupError) {
                         console.error("[Schulorganizer] Nicht gespeicherte Projektdatei konnte nicht bereinigt werden:", cleanupError);
                     }
@@ -1523,17 +1517,7 @@ function createFileElement(file) {
         }
 
         try {
-            const isLink = Boolean(file.url) && !file.size;
-            const blob = isLink ? null : await readFile(file.id);
-            if (!isLink) {
-                await removeStoredFile(file.id);
-            }
-            try {
-                deleteFile(file.id);
-            } catch (metadataError) {
-                if (!isLink && blob) await storeFile(file.id, blob);
-                throw metadataError;
-            }
+            await deleteFile(file.id);
             renderAll();
             success("Datei gelöscht.");
         } catch (deleteError) {
@@ -2196,25 +2180,14 @@ function openFileModal(
                     renderSelectedFiles(selectedList, selections);
 
                     try {
-                        const id = crypto.randomUUID();
-                        await storeFile(id, selection.file);
-                        try {
-                            addFile(
-                                selection.file.name,
-                                getFileTypeLabel(selection.file),
-                                selectedSubject,
-                                "",
-                                {
-                                    id,
-                                    mimeType: selection.file.type || inferMimeType({ name: selection.file.name }),
-                                    size: selection.file.size
-                                }
-                            );
-                            selection.status = "Hochgeladen";
-                        } catch (metadataError) {
-                            await removeStoredFile(id);
-                            throw metadataError;
-                        }
+                        await addFile(
+                            selection.file.name,
+                            getFileTypeLabel(selection.file),
+                            selectedSubject,
+                            "",
+                            { content: selection.file }
+                        );
+                        selection.status = "Hochgeladen";
                     } catch (uploadError) {
                         console.error("[Schulorganizer] Datei-Upload fehlgeschlagen:", uploadError);
                         selection.status = "Fehlgeschlagen";
@@ -2245,7 +2218,7 @@ function openFileModal(
 
         content: form,
 
-        onSubmit: () => {
+        onSubmit: async () => {
             const name = form.querySelector('input[name="name"]').value.trim();
 
             if (!name) {
@@ -2267,7 +2240,7 @@ function openFileModal(
                 return;
             }
 
-            updateFile(existingFile.id, { name, type, subject, url });
+            await updateFile(existingFile.id, { name, type, subject, url });
             success("Datei aktualisiert.");
 
             closeModal();
@@ -2316,7 +2289,7 @@ function openFileLinkModal() {
         title: "Datei-Link hinzufügen",
         content: form,
         submitText: "Link speichern",
-        onSubmit: () => {
+        onSubmit: async () => {
             const name = nameField.querySelector("input").value.trim();
             const url = urlField.querySelector("input").value.trim();
             if (!name || !url || !isSafeFileUrl(url)) {
@@ -2324,7 +2297,7 @@ function openFileLinkModal() {
                 return;
             }
 
-            addFile(
+            await addFile(
                 name,
                 typeField.querySelector("select").value,
                 subjectField.querySelector("select").value,
@@ -2707,15 +2680,62 @@ function renderAll() {
 |--------------------------------------------------------------------------
 */
 
-renderAll();
-const savedPage = window.location.hash.slice(1);
-navigateTo(
-    ["dashboard", "tasks", "presentations", "notes", "files", "subjects"].includes(savedPage)
-        ? savedPage
-        : "dashboard",
-    { replaceHistory: true }
-);
+async function initializeApplication() {
+    try {
+        await refreshSharedData();
+        try {
+            const migration = await migrateLegacySharedData();
+            if (migration.files > 0 || migration.presentations > 0) {
+                await refreshSharedData();
+                success(
+                    `${migration.files} alte Datei(en) und ${migration.presentations} alte(s) Projekt(e) wurden für alle Nutzer freigegeben.`
+                );
+            }
+        } catch (migrationError) {
+            console.error("[Schulorganizer] Frühere lokale Dateien konnten nicht vollständig übernommen werden:", migrationError);
+            error("Einige vor dem Update gespeicherte Dateien konnten noch nicht freigegeben werden. Die lokalen Originale bleiben erhalten; lade die Seite nach Behebung des Problems erneut.");
+        }
+        renderAll();
+        const savedPage = window.location.hash.slice(1);
+        navigateTo(
+            ["dashboard", "tasks", "presentations", "notes", "files", "subjects"].includes(savedPage)
+                ? savedPage
+                : "dashboard",
+            { replaceHistory: true }
+        );
 
-if (getStorageIssues().length > 0) {
-    error("Einige Inhalte konnten nicht geladen oder gespeichert werden. Prüfe die Browser-Speichereinstellungen.");
+        let syncWarningShown = false;
+        startSharedSync(
+            () => {
+                syncWarningShown = false;
+                renderAll();
+            },
+            syncError => {
+                console.error("[Schulorganizer] Gemeinsame Daten konnten nicht synchronisiert werden:", syncError);
+                if (!syncWarningShown) {
+                    syncWarningShown = true;
+                    error("Die Verbindung zum gemeinsamen Projektspeicher ist unterbrochen. Änderungen werden erst nach Wiederherstellung gespeichert.");
+                }
+            }
+        );
+
+        if (getStorageIssues().length > 0) {
+            error("Einige lokale Inhalte konnten nicht geladen oder gespeichert werden. Prüfe die Browser-Speichereinstellungen.");
+        }
+    } catch (loadError) {
+        console.error("[Schulorganizer] Gemeinsame Projekte und Dateien konnten nicht geladen werden:", loadError);
+        const message = "Der gemeinsame Projektspeicher ist nicht erreichbar. Bitte prüfe die Serververbindung und lade die Seite erneut.";
+        [presentationList, fileList].forEach(list => {
+            list.replaceChildren(createElement("p", "empty-state", message));
+        });
+        addPresentationProjectButton.disabled = true;
+        uploadPresentationButton.disabled = true;
+        document.querySelector("#addMenu").querySelectorAll("[data-add-type='presentations'], [data-add-type='files'], [data-add-type='fileLink']")
+            .forEach(button => {
+                button.disabled = true;
+            });
+        error(message);
+    }
 }
+
+initializeApplication();

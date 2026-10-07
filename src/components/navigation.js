@@ -5,7 +5,7 @@ const pages = {
     dashboard: {
         title: "Übersicht",
         description:
-            "Deine schulischen Inhalte – lokal auf diesem Gerät gespeichert."
+            "Deine schulischen Inhalte im Überblick."
     },
 
     tasks: {
