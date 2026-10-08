@@ -3,6 +3,7 @@ import { after, before, test } from "node:test";
 import { PGlite } from "@electric-sql/pglite";
 import uploadTokenFunction, { config as uploadTokenConfig } from "../api/files/upload-token.js";
 import catchAllFunction, { config as catchAllConfig } from "../api/[...path].js";
+import { getUploadContentType } from "../src/data/sharedApi.js";
 import { createApiHandler } from "../src/serverless/handler.js";
 
 test("Vercel upload-token route is explicit and keeps request bodies unparsed", () => {
@@ -10,6 +11,13 @@ test("Vercel upload-token route is explicit and keeps request bodies unparsed", 
     assert.equal(uploadTokenConfig.api.bodyParser, false);
     assert.equal(typeof catchAllFunction, "function");
     assert.equal(catchAllConfig.api.bodyParser, false);
+});
+
+test("PNG uploads retain an image MIME type when the browser omits it", () => {
+    assert.equal(getUploadContentType({ name: "photo.png", type: "" }), "image/png");
+    assert.equal(getUploadContentType({ name: "photo.PNG", type: "application/octet-stream" }), "image/png");
+    assert.equal(getUploadContentType({ name: "photo.png", type: "image/png" }), "image/png");
+    assert.equal(getUploadContentType({ name: "archive.exe", type: "" }), "application/octet-stream");
 });
 
 let pg;
@@ -91,6 +99,7 @@ test("Blob upload tokens constrain file types and size", async () => {
         assert.equal(uploadOptions.request.url, "https://school.test/api/files/upload-token");
         const constraints = await uploadOptions.onBeforeGenerateToken("upload.pptx");
         assert.equal(constraints.maximumSizeInBytes, 100 * 1024 * 1024);
+        assert.ok(constraints.allowedContentTypes.includes("image/*"));
         assert.ok(constraints.allowedContentTypes.includes("application/*"));
 
         const strippedPrefixResponse = await handler(new Request(

@@ -7,6 +7,12 @@ const sharedData = {
 };
 let refreshPromise;
 
+export function getUploadContentType(file, fallbackType = "") {
+    if (file.type && file.type !== "application/octet-stream") return file.type;
+    if (/\.png$/i.test(file.name ?? "")) return "image/png";
+    return file.type || fallbackType || "application/octet-stream";
+}
+
 async function request(path, options = {}) {
     let response;
     try {
@@ -99,9 +105,10 @@ export async function deleteSharedPresentation(id) {
 
 export async function uploadSharedFile(file, metadata) {
     const id = crypto.randomUUID();
+    const contentType = getUploadContentType(file);
     const blob = await upload(`${id}-${file.name}`, file, {
         access: "public",
-        contentType: file.type || "application/octet-stream",
+        contentType,
         handleUploadUrl: `${API_ROOT}/files/upload-token`,
         multipart: file.size > 5 * 1024 * 1024,
         onUploadProgress: metadata.onUploadProgress
@@ -111,7 +118,7 @@ export async function uploadSharedFile(file, metadata) {
         name: file.name,
         type: metadata.type ?? "",
         subject: metadata.subject ?? "",
-        mimeType: file.type || blob.contentType || "application/octet-stream",
+        mimeType: contentType || blob.contentType || "application/octet-stream",
         size: file.size,
         url: blob.url,
         createdAt: Date.now()
@@ -123,9 +130,13 @@ export async function uploadSharedFile(file, metadata) {
 export async function migrateLegacyFile(file, content) {
     let blobUrl = "";
     if (content instanceof Blob) {
+        const contentType = getUploadContentType(
+            { name: file.name, type: content.type },
+            file.mimeType
+        );
         const blob = await upload(`${file.id}-${file.name}`, content, {
             access: "public",
-            contentType: content.type || file.mimeType || "application/octet-stream",
+            contentType,
             handleUploadUrl: `${API_ROOT}/files/upload-token`,
             multipart: content.size > 5 * 1024 * 1024
         });
@@ -138,7 +149,9 @@ export async function migrateLegacyFile(file, content) {
         subject: file.subject ?? "",
         url: file.url ?? "",
         blobUrl,
-        mimeType: content?.type || file.mimeType || "application/octet-stream",
+        mimeType: content instanceof Blob
+            ? getUploadContentType({ name: file.name, type: content.type }, file.mimeType)
+            : getUploadContentType({ name: file.name, type: file.mimeType }, file.mimeType),
         size: content?.size ?? file.size ?? 0,
         createdAt: file.createdAt ?? Date.now()
     }));
