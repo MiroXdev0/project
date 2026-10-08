@@ -58,6 +58,10 @@ test("health and state use the shared PostgreSQL schema", async () => {
     assert.equal(health.status, 200);
     assert.deepEqual(await json(health), { status: "ok" });
 
+    const strippedPrefixHealth = await handler(new Request("https://school.test/health"));
+    assert.equal(strippedPrefixHealth.status, 200);
+    assert.deepEqual(await json(strippedPrefixHealth), { status: "ok" });
+
     const state = await api("/state");
     assert.equal(state.status, 200);
     assert.deepEqual(await json(state), { presentations: [], files: [] });
@@ -79,6 +83,17 @@ test("Blob upload tokens constrain file types and size", async () => {
         const constraints = await uploadOptions.onBeforeGenerateToken("upload.pptx");
         assert.equal(constraints.maximumSizeInBytes, 100 * 1024 * 1024);
         assert.ok(constraints.allowedContentTypes.includes("application/*"));
+
+        const strippedPrefixResponse = await handler(new Request(
+            "https://school.test/files/upload-token",
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ type: "blob.generate-client-token", payload: "{}" })
+            }
+        ));
+        assert.equal(strippedPrefixResponse.status, 200);
+        assert.deepEqual(await json(strippedPrefixResponse), { clientToken: "test-client-token" });
     } finally {
         if (previousToken === undefined) delete process.env.BLOB_READ_WRITE_TOKEN;
         else process.env.BLOB_READ_WRITE_TOKEN = previousToken;

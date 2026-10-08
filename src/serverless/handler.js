@@ -187,13 +187,14 @@ export function createApiHandler({
     return async request => {
         const url = new URL(request.url);
         const path = url.pathname.replace(/\/+$/, "");
-        const segments = path.split("/").filter(Boolean).slice(1).map(segment => {
+        const segments = path.split("/").filter(Boolean).map(segment => {
             try {
                 return decodeURIComponent(segment);
             } catch {
                 return "";
             }
         });
+        if (segments[0] === "api") segments.shift();
         const method = request.method.toUpperCase();
 
         if (method === "OPTIONS") {
