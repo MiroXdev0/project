@@ -237,7 +237,9 @@ async function runAction(action) {
         } catch (renderError) {
             console.error("[Schulorganizer] Ansicht konnte nicht aktualisiert werden:", renderError);
         }
-        error("Die Änderung konnte nicht gespeichert werden. Bitte versuche es erneut.");
+        error(actionError instanceof Error
+            ? actionError.message
+            : "Die Änderung konnte nicht gespeichert werden. Bitte versuche es erneut.");
     }
 }
 
@@ -2173,6 +2175,7 @@ function openFileModal(
                     return;
                 }
 
+                let uploadFailureMessage = "";
                 for (let index = 0; index < pending.length; index += 1) {
                     const selection = pending[index];
                     selection.status = "Wird gespeichert …";
@@ -2190,6 +2193,9 @@ function openFileModal(
                         selection.status = "Hochgeladen";
                     } catch (uploadError) {
                         console.error("[Schulorganizer] Datei-Upload fehlgeschlagen:", uploadError);
+                        uploadFailureMessage = uploadError instanceof Error
+                            ? uploadError.message
+                            : "Der Datei-Upload ist fehlgeschlagen.";
                         selection.status = "Fehlgeschlagen";
                     }
 
@@ -2199,7 +2205,7 @@ function openFileModal(
                 const failed = selections.filter(item => item.status === "Fehlgeschlagen").length;
                 if (failed > 0) {
                     status.textContent = `${failed} Datei(en) konnten nicht gespeichert werden.`;
-                    error("Mindestens eine Datei konnte nicht gespeichert werden.");
+                    error(uploadFailureMessage || "Mindestens eine Datei konnte nicht gespeichert werden.");
                     renderAll();
                     return;
                 }
@@ -2724,7 +2730,9 @@ async function initializeApplication() {
         }
     } catch (loadError) {
         console.error("[Schulorganizer] Gemeinsame Projekte und Dateien konnten nicht geladen werden:", loadError);
-        const message = "Der gemeinsame Projektspeicher ist nicht erreichbar. Bitte prüfe die Serververbindung und lade die Seite erneut.";
+        const message = loadError instanceof Error
+            ? loadError.message
+            : "Der gemeinsame Projektspeicher ist nicht erreichbar. Bitte prüfe die Serververbindung und lade die Seite erneut.";
         [presentationList, fileList].forEach(list => {
             list.replaceChildren(createElement("p", "empty-state", message));
         });

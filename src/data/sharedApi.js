@@ -1,4 +1,5 @@
-const API_ROOT = "/api";
+const configuredApiRoot = import.meta.env.VITE_API_URL?.trim();
+const API_ROOT = (configuredApiRoot || "/api").replace(/\/+$/, "");
 const sharedData = {
     presentations: [],
     files: []
@@ -8,21 +9,34 @@ let refreshTimer;
 let refreshPromise;
 
 async function request(path, options = {}) {
-    const response = await fetch(`${API_ROOT}${path}`, {
-        cache: "no-store",
-        ...options
-    });
+    let response;
+    try {
+        response = await fetch(`${API_ROOT}${path}`, {
+            cache: "no-store",
+            ...options
+        });
+    } catch (requestError) {
+        throw new Error(
+            `Der gemeinsame Dateiserver ist nicht erreichbar. Prüfe die VITE_API_URL-Einstellung auf Vercel und ob der Node-Server läuft. (${requestError.message})`
+        );
+    }
     if (!response.ok) {
         let message = `Serveranfrage fehlgeschlagen (${response.status}).`;
         try {
             const result = await response.json();
             if (typeof result.error === "string") message = result.error;
         } catch {
-            // Keep the HTTP status message when the server did not return JSON.
+            if (response.status === 404 || response.headers.get("content-type")?.includes("text/html")) {
+                message = "Der gemeinsame Datei-Server ist unter dieser Adresse nicht eingerichtet. Vercel stellt nur die Website bereit; verbinde sie mit dem laufenden Node-Backend.";
+            }
         }
         throw new Error(message);
     }
-    return response.status === 204 ? null : response.json();
+    if (response.status === 204) return null;
+    if (!response.headers.get("content-type")?.includes("application/json")) {
+        throw new Error("Der gemeinsame Datei-Server hat keine API-Antwort geliefert. Prüfe die VITE_API_URL-Einstellung und den Backend-Status.");
+    }
+    return response.json();
 }
 
 function mutateCollection(collectionName, item, id = item?.id) {
@@ -153,10 +167,17 @@ export async function deleteSharedFile(id) {
 
 export async function fetchSharedFile(id, { download = false } = {}) {
     const query = download ? "?download=1" : "";
-    const response = await fetch(
-        `${API_ROOT}/files/${encodeURIComponent(id)}/content${query}`,
-        { cache: "no-store" }
-    );
+    let response;
+    try {
+        response = await fetch(
+            `${API_ROOT}/files/${encodeURIComponent(id)}/content${query}`,
+            { cache: "no-store" }
+        );
+    } catch (requestError) {
+        throw new Error(
+            `Der gemeinsame Dateiserver ist nicht erreichbar. Prüfe VITE_API_URL und den Backend-Status. (${requestError.message})`
+        );
+    }
     if (!response.ok) {
         let message = `Datei konnte nicht vom Server geladen werden (${response.status}).`;
         try {

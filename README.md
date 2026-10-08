@@ -20,6 +20,34 @@ Adresse aus. Eine rein statische Bereitstellung, zum Beispiel auf GitHub Pages,
 stellt die Datenbank-API nicht bereit und synchronisiert daher keine Projekte
 oder Dateien.
 
+### Vercel-Frontend mit gemeinsamem Datei-Server
+
+Ein Vercel-Deployment, das nur `vite build` ausführt, hostet die statische Website,
+aber nicht den Express-/SQLite-Server. Damit Uploads eines Geräts auf anderen
+Geräten erscheinen, muss ein laufender Node-Server mit dauerhaftem Datenträger
+bereitstehen und das Vercel-Frontend auf dessen API zeigen:
+
+1. `render.yaml` als Blueprint in Render bereitstellen und die angezeigte
+   `APP_ORIGIN`-Variable auf die vollständige Vercel-Website-Adresse setzen,
+   zum Beispiel `https://schulorganizer.vercel.app`. Render stellt hierfür eine
+   dauerhafte SQLite-Festplatte bereit.
+2. Den tatsächlichen öffentlichen Service-Link aus dem Render-Dashboard öffnen
+   und prüfen, dass `<Service-Link>/api/health` `{"status":"ok"}` zurückgibt.
+3. In Vercel unter **Project → Settings → Environment Variables** die Variable
+   `VITE_API_URL` auf `<Service-Link>/api` setzen, zum Beispiel
+   `https://dein-service.onrender.com/api`, für alle benötigten Umgebungen.
+4. Eine neue Vercel-Bereitstellung auslösen. `VITE_API_URL` wird beim Build in
+   die Website übernommen.
+5. Auf beiden Geräten dieselbe Vercel-Adresse öffnen. Zum Prüfen des Backends
+   `<Service-Link>/api/state` direkt aufrufen; dort muss JSON erscheinen. Die
+   Adresse `/api/state` auf Vercel selbst wird bei direkter API-Konfiguration
+   nicht zum Backend weitergeleitet.
+
+Der Name `schulorganizer` in `render.yaml` ist nur der gewünschte Render-Service-
+Name; verwende immer den tatsächlich im Render-Dashboard angezeigten Link.
+Ohne diese beiden Einstellungen kann die Website Dateien lokal auswählen, aber
+der gemeinsame Server kann sie nicht speichern oder zwischen Geräten verteilen.
+
 Projekte, Datei-Metadaten und Originaldateien werden in einer SQLite-Datenbank
 gespeichert. `DATABASE_PATH` legt den Datenbankpfad fest; standardmäßig ist das
 `data/schulorganizer.sqlite`. In der Hosting-Umgebung muss dieser Pfad auf einem

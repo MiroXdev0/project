@@ -124,6 +124,33 @@ export function createApiApp(database) {
     }
 
     app.disable("x-powered-by");
+    app.use("/api", (request, response, next) => {
+        const origin = request.get("Origin");
+        const configuredOrigins = (process.env.APP_ORIGIN ?? "")
+            .split(",")
+            .map(value => value.trim())
+            .filter(Boolean);
+        const isLocalDevelopmentOrigin = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin ?? "");
+        response.vary("Origin");
+
+        if (origin && (configuredOrigins.includes(origin) || isLocalDevelopmentOrigin)) {
+            response.set("Access-Control-Allow-Origin", origin);
+            response.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+            response.set("Access-Control-Allow-Headers", "Content-Type");
+            response.set("Access-Control-Max-Age", "600");
+        } else if (origin) {
+            response.status(403).json({
+                error: "Diese Website ist nicht für den gemeinsamen Datei-Server freigegeben. Ergänze ihre Adresse in APP_ORIGIN."
+            });
+            return;
+        }
+
+        if (request.method === "OPTIONS") {
+            response.status(204).end();
+            return;
+        }
+        next();
+    });
     app.use("/api", express.json({ limit: "1mb" }));
 
     app.get("/api/health", (_request, response) => {

@@ -9,11 +9,17 @@ import { createApiApp, createDatabase } from "../server.js";
 const servers = [];
 const databases = [];
 const temporaryDirectories = [];
+const originalAppOrigin = process.env.APP_ORIGIN;
 
 afterEach(async () => {
     await Promise.all(servers.splice(0).map(server => new Promise(resolve => server.close(resolve))));
     databases.splice(0).forEach(database => database.close());
     temporaryDirectories.splice(0).forEach(directory => fs.rmSync(directory, { recursive: true, force: true }));
+    if (originalAppOrigin === undefined) {
+        delete process.env.APP_ORIGIN;
+    } else {
+        process.env.APP_ORIGIN = originalAppOrigin;
+    }
 });
 
 async function startApi() {
@@ -161,6 +167,54 @@ test("invalid project references and missing uploads return clear client errors"
     });
     assert.equal(missingUpload.status, 400);
     assert.match((await missingUpload.json()).error, /keine Datei übertragen/);
+});
+
+test("API permits the configured Vercel origin and rejects unconfigured browser origins", async () => {
+    process.env.APP_ORIGIN = "https://school.example,https://www.school.example";
+    const { baseUrl } = await startApi();
+    const allowed = await fetch(`${baseUrl}/api/state`, {
+        headers: { Origin: "https://school.example" }
+    });
+    assert.equal(allowed.status, 200);
+    assert.equal(allowed.headers.get("access-control-allow-origin"), "https://school.example");
+
+    const preflight = await fetch(`${baseUrl}/api/files`, {
+        method: "OPTIONS",
+        headers: {
+            Origin: "https://school.example",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type"
+        }
+    });
+    assert.equal(preflight.status, 204);
+    assert.equal(preflight.headers.get("access-control-allow-methods"), "GET, POST, PUT, DELETE, OPTIONS");
+
+    const upload = new FormData();
+    upload.set("file", new Blob(["shared from another device"], { type: "text/plain" }), "cross-device.txt");
+    const uploadResponse = await fetch(`${baseUrl}/api/files`, {
+        method: "POST",
+        headers: { Origin: "https://school.example" },
+        body: upload
+    });
+    assert.equal(uploadResponse.status, 201);
+    assert.equal(uploadResponse.headers.get("access-control-allow-origin"), "https://school.example");
+
+    const otherDeviceState = await fetch(`${baseUrl}/api/state`, {
+        headers: { Origin: "https://www.school.example" }
+    }).then(json);
+    assert.equal(otherDeviceState.files[0].name, "cross-device.txt");
+
+    const eventStream = await fetch(`${baseUrl}/api/events`, {
+        headers: { Origin: "https://school.example" }
+    });
+    assert.equal(eventStream.headers.get("access-control-allow-origin"), "https://school.example");
+    await eventStream.body.cancel();
+
+    const denied = await fetch(`${baseUrl}/api/state`, {
+        headers: { Origin: "https://unrelated.example" }
+    });
+    assert.equal(denied.status, 403);
+    assert.match((await denied.json()).error, /APP_ORIGIN/);
 });
 
 test("legacy files and projects migrate with their original IDs and without duplicates", async () => {
