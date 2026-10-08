@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { PGlite } from "@electric-sql/pglite";
+import uploadTokenFunction, { config as uploadTokenConfig } from "../api/files/upload-token.js";
+import catchAllFunction, { config as catchAllConfig } from "../api/[...path].js";
 import { createApiHandler } from "../src/serverless/handler.js";
+
+test("Vercel upload-token route is explicit and keeps request bodies unparsed", () => {
+    assert.equal(typeof uploadTokenFunction, "function");
+    assert.equal(uploadTokenConfig.api.bodyParser, false);
+    assert.equal(typeof catchAllFunction, "function");
+    assert.equal(catchAllConfig.api.bodyParser, false);
+});
 
 let pg;
 let handler;
