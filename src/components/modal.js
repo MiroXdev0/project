@@ -180,12 +180,12 @@ export async function submitModal() {
             isSubmitting = false;
             setSubmitState(true);
         }
-    } catch (error) {
+    } catch (submitError) {
         console.error(
             "[Schulorganizer] Modal submit error:",
-            error
+            submitError
         );
-        notifyModalError();
+        notifyModalError(submitError);
 
         isSubmitting = false;
 
@@ -193,11 +193,13 @@ export async function submitModal() {
     }
 }
 
-function notifyModalError() {
+function notifyModalError(submitError) {
     const message = document.createElement("p");
     message.className = "modal-error-message";
     message.setAttribute("role", "alert");
-    message.textContent = "Die Änderung konnte nicht gespeichert werden. Bitte erneut versuchen.";
+    message.textContent = submitError instanceof Error && submitError.message.trim()
+        ? submitError.message
+        : "Die Änderung konnte nicht gespeichert werden. Bitte erneut versuchen.";
     modalBody.querySelector(".modal-error-message")?.remove();
     modalBody.prepend(message);
 }
