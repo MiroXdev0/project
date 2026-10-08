@@ -4,7 +4,7 @@ import { PGlite } from "@electric-sql/pglite";
 import uploadTokenFunction, { config as uploadTokenConfig } from "../api/files/upload-token.js";
 import catchAllFunction, { config as catchAllConfig } from "../api/[...path].js";
 import { BLOB_ACCESS } from "../src/data/blobAccess.js";
-import { getUploadContentType } from "../src/data/sharedApi.js";
+import { deleteSharedFile, getUploadContentType } from "../src/data/sharedApi.js";
 import { createApiHandler } from "../src/serverless/handler.js";
 
 test("Vercel upload-token route is explicit and keeps request bodies unparsed", () => {
@@ -12,6 +12,28 @@ test("Vercel upload-token route is explicit and keeps request bodies unparsed", 
     assert.equal(uploadTokenConfig.api.bodyParser, false);
     assert.equal(typeof catchAllFunction, "function");
     assert.equal(catchAllConfig.api.bodyParser, false);
+});
+
+test("Vercel file-id route is explicit and DELETE uses /api/files/:id", async () => {
+    const { default: fileFunction, config: fileConfig } = await import("../api/files/[id].js");
+    assert.equal(typeof fileFunction, "function");
+    assert.equal(fileConfig.api.bodyParser, false);
+
+    const originalFetch = globalThis.fetch;
+    let requestedUrl;
+    let requestedMethod;
+    globalThis.fetch = async (url, options) => {
+        requestedUrl = url;
+        requestedMethod = options.method;
+        return new Response(null, { status: 204 });
+    };
+    try {
+        await deleteSharedFile("math-file");
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+    assert.equal(requestedUrl, "/api/files/math-file");
+    assert.equal(requestedMethod, "DELETE");
 });
 
 test("PNG uploads retain an image MIME type when the browser omits it", () => {
