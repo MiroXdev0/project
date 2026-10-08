@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import { Pool } from "@neondatabase/serverless";
 import { put } from "@vercel/blob";
+import { BLOB_ACCESS } from "../src/data/blobAccess.js";
 import { postgresSchema } from "../src/serverless/handler.js";
 
 const [sqlitePath] = process.argv.slice(2);
@@ -41,7 +42,7 @@ try {
         if (!blobUrl && content !== null) {
             const safeName = String(file.name).replaceAll("\\", "/").split("/").pop();
             const blob = await put(`${randomUUID()}-${safeName}`, content, {
-                access: "public",
+                access: BLOB_ACCESS,
                 token: process.env.BLOB_READ_WRITE_TOKEN,
                 contentType: file.mime_type || "application/octet-stream",
                 addRandomSuffix: true

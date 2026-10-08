@@ -94,10 +94,12 @@ Eine reine Vite-Vorschau (`vite preview`) stellt die API nicht bereit.
 - Uploads sind auf 100 MB je Datei begrenzt. Der Browser lädt Dateien direkt
   nach Blob, damit der Request nicht durch das Größenlimit einer Vercel Function
   muss.
-- Die Anwendung hat weiterhin keine Anmeldung oder Benutzerrechte. Projekte
-  und öffentliche Blob-Dateien sind für jeden erreichbar, der die Website
-  aufrufen kann. Vor einem Einsatz mit vertraulichen Schülerdaten muss ein
-  passendes Authentifizierungs- und Berechtigungssystem ergänzt werden.
+- Die Blob-Dateien werden privat gespeichert und sind nicht direkt über ihre
+  Blob-URL öffentlich abrufbar. Die Anwendung hat jedoch weiterhin keine
+  Anmeldung oder Benutzerrechte; die API zum Anzeigen/Herunterladen der Dateien
+  ist damit für jeden erreichbar, der die Website aufrufen kann. Vor einem
+  Einsatz mit vertraulichen Schülerdaten muss ein passendes Authentifizierungs-
+  und Berechtigungssystem ergänzt werden.
 
 ## Tests und Build
 

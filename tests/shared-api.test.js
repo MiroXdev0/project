@@ -3,6 +3,7 @@ import { after, before, test } from "node:test";
 import { PGlite } from "@electric-sql/pglite";
 import uploadTokenFunction, { config as uploadTokenConfig } from "../api/files/upload-token.js";
 import catchAllFunction, { config as catchAllConfig } from "../api/[...path].js";
+import { BLOB_ACCESS } from "../src/data/blobAccess.js";
 import { getUploadContentType } from "../src/data/sharedApi.js";
 import { createApiHandler } from "../src/serverless/handler.js";
 
@@ -20,9 +21,14 @@ test("PNG uploads retain an image MIME type when the browser omits it", () => {
     assert.equal(getUploadContentType({ name: "archive.exe", type: "" }), "application/octet-stream");
 });
 
+test("browser and legacy uploads target the configured private Blob store", () => {
+    assert.equal(BLOB_ACCESS, "private");
+});
+
 let pg;
 let handler;
 const deletedBlobs = [];
+const readBlobs = [];
 let uploadOptions;
 
 before(async () => {
@@ -46,6 +52,19 @@ before(async () => {
     handler = createApiHandler({
         database,
         deleteBlob: async url => deletedBlobs.push(url),
+        getBlob: async url => {
+            readBlobs.push(url);
+            return {
+                statusCode: 200,
+                stream: new ReadableStream({
+                    start(controller) {
+                        controller.enqueue(new TextEncoder().encode("private file bytes"));
+                        controller.close();
+                    }
+                }),
+                blob: { contentType: "application/pdf" }
+            };
+        },
         handleBlobUpload: async options => {
             uploadOptions = options;
             return { clientToken: "test-client-token" };
@@ -100,6 +119,7 @@ test("Blob upload tokens constrain file types and size", async () => {
         const constraints = await uploadOptions.onBeforeGenerateToken("upload.pptx");
         assert.equal(constraints.maximumSizeInBytes, 100 * 1024 * 1024);
         assert.ok(constraints.allowedContentTypes.includes("image/*"));
+        assert.ok(constraints.allowedContentTypes.includes("text/*"));
         assert.ok(constraints.allowedContentTypes.includes("application/*"));
 
         const strippedPrefixResponse = await handler(new Request(
@@ -119,7 +139,7 @@ test("Blob upload tokens constrain file types and size", async () => {
 });
 
 test("uploaded file metadata, project attachments, edits, and deletion persist", async () => {
-    const blobUrl = "https://school.public.blob.vercel-storage.com/math.pdf";
+    const blobUrl = "https://school.private.blob.vercel-storage.com/math.pdf";
     const fileResponse = await api("/files", {
         method: "POST",
         body: {
@@ -171,8 +191,14 @@ test("uploaded file metadata, project attachments, edits, and deletion persist",
     assert.deepEqual(project.fileIds, ["math-file"]);
 
     const contentResponse = await api("/files/math-file/content");
-    assert.equal(contentResponse.status, 302);
-    assert.equal(contentResponse.headers.get("location"), blobUrl);
+    assert.equal(contentResponse.status, 200);
+    assert.equal(contentResponse.headers.get("content-type"), "application/pdf");
+    assert.equal(contentResponse.headers.get("content-disposition"), "inline; filename*=UTF-8''Mathe.pdf");
+    assert.equal(await contentResponse.text(), "private file bytes");
+    assert.equal(readBlobs[0], blobUrl);
+
+    const downloadResponse = await api("/files/math-file/content?download=1");
+    assert.equal(downloadResponse.headers.get("content-disposition"), "attachment; filename*=UTF-8''Mathe.pdf");
 
     const update = await api("/files/math-file", {
         method: "PUT",
@@ -215,7 +241,7 @@ test("external file links accept HTTP(S) only", async () => {
 });
 
 test("legacy file and presentation migration is repeatable and repairs attachments", async () => {
-    const blobUrl = "https://school.public.blob.vercel-storage.com/legacy.pdf";
+    const blobUrl = "https://school.private.blob.vercel-storage.com/legacy.pdf";
     const imported = await api("/migration/files", {
         method: "POST",
         body: {
@@ -266,7 +292,7 @@ test("legacy file and presentation migration is repeatable and repairs attachmen
             id: "later-file",
             name: "Bild.png",
             size: 2,
-            url: "https://school.public.blob.vercel-storage.com/bild.png"
+            url: "https://school.private.blob.vercel-storage.com/bild.png"
         }
     });
     assert.equal(laterFile.status, 201);

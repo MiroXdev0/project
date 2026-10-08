@@ -177,6 +177,7 @@ async function ensureSchema(database, readySchemas) {
 export function createApiHandler({
     database,
     deleteBlob = async () => {},
+    getBlob = async () => null,
     handleBlobUpload = handleVercelBlobUpload
 }) {
     if (!database?.query || !database?.transaction) {
@@ -524,7 +525,23 @@ export function createApiHandler({
                 );
                 const blobUrl = result.rows[0]?.blob_url;
                 if (!blobUrl) return failure("Der Dateiinhalt wurde nicht gefunden.", 404);
-                return Response.redirect(blobUrl, 302);
+                const file = await getFile(database, segments[1]);
+                const blob = await getBlob(blobUrl);
+                if (!blob || blob.statusCode !== 200) {
+                    return failure("Der Dateiinhalt wurde nicht gefunden.", 404);
+                }
+                const filename = encodeURIComponent(file.name).replace(
+                    /[!'()*]/g,
+                    character => `%${character.charCodeAt(0).toString(16).toUpperCase()}`
+                );
+                return new Response(blob.stream, {
+                    headers: {
+                        "Content-Type": blob.blob.contentType,
+                        "Content-Disposition": `${url.searchParams.has("download") ? "attachment" : "inline"}; filename*=UTF-8''${filename}`,
+                        "Cache-Control": "private, no-store",
+                        "X-Content-Type-Options": "nosniff"
+                    }
+                });
             }
 
             if (segments[0] === "files" && segments.length === 2 && method === "DELETE") {

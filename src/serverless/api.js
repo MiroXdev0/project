@@ -1,6 +1,9 @@
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { Pool } from "@neondatabase/serverless";
-import { del } from "@vercel/blob";
+import { del, get } from "@vercel/blob";
 import { handleUpload } from "@vercel/blob/client";
+import { BLOB_ACCESS } from "../data/blobAccess.js";
 import { createApiHandler } from "./handler.js";
 
 let pool;
@@ -46,6 +49,7 @@ function getHandler() {
     handler = createApiHandler({
         database,
         deleteBlob: url => del(url),
+        getBlob: url => get(url, { access: BLOB_ACCESS }),
         handleBlobUpload: options => handleUpload(options)
     });
     return handler;
@@ -95,7 +99,7 @@ export default async function handleVercelApiRequest(request, response) {
             response.end();
             return;
         }
-        response.end(Buffer.from(await webResponse.arrayBuffer()));
+        await pipeline(Readable.fromWeb(webResponse.body), response);
     } catch (error) {
         console.error("[Schulorganizer] Vercel API request failed:", error);
         if (response.headersSent) {

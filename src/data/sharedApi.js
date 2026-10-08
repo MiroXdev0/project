@@ -1,4 +1,5 @@
 import { upload } from "@vercel/blob/client";
+import { BLOB_ACCESS } from "./blobAccess.js";
 
 const API_ROOT = "/api";
 const sharedData = {
@@ -107,7 +108,7 @@ export async function uploadSharedFile(file, metadata) {
     const id = crypto.randomUUID();
     const contentType = getUploadContentType(file);
     const blob = await upload(`${id}-${file.name}`, file, {
-        access: "public",
+        access: BLOB_ACCESS,
         contentType,
         handleUploadUrl: `${API_ROOT}/files/upload-token`,
         multipart: file.size > 5 * 1024 * 1024,
@@ -135,7 +136,7 @@ export async function migrateLegacyFile(file, content) {
             file.mimeType
         );
         const blob = await upload(`${file.id}-${file.name}`, content, {
-            access: "public",
+            access: BLOB_ACCESS,
             contentType,
             handleUploadUrl: `${API_ROOT}/files/upload-token`,
             multipart: content.size > 5 * 1024 * 1024
