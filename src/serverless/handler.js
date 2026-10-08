@@ -552,7 +552,10 @@ export function createApiHandler({
                         await deleteBlob(file.url);
                     } catch (deleteError) {
                         console.error("[Schulorganizer] Vercel Blob delete failed:", deleteError);
-                        return failure("Die Originaldatei konnte nicht aus dem Vercel Blob-Speicher gelöscht werden.", 502);
+                        return failure(
+                            "Die Datei konnte nicht aus Vercel Blob gelöscht werden. Der Dateieintrag bleibt erhalten; prüfe die serverseitige Blob-Konfiguration und versuche es erneut.",
+                            502
+                        );
                     }
                 }
                 await database.query("DELETE FROM files WHERE id = $1", [segments[1]]);

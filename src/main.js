@@ -1524,7 +1524,9 @@ function createFileElement(file) {
             success("Datei gelöscht.");
         } catch (deleteError) {
             console.error("[Schulorganizer] Datei konnte nicht gelöscht werden:", deleteError);
-            error("Die Datei konnte nicht gelöscht werden. Bitte erneut versuchen.");
+            error(deleteError instanceof Error
+                ? deleteError.message
+                : "Die Datei konnte nicht gelöscht werden. Bitte erneut versuchen.");
         }
     });
     actions.append(openButton, downloadButton, editButton, deleteButton);

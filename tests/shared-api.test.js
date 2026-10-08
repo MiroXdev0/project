@@ -30,6 +30,7 @@ let handler;
 const deletedBlobs = [];
 const readBlobs = [];
 let uploadOptions;
+let blobDeletionFailure;
 
 before(async () => {
     pg = new PGlite();
@@ -51,7 +52,10 @@ before(async () => {
     };
     handler = createApiHandler({
         database,
-        deleteBlob: async url => deletedBlobs.push(url),
+        deleteBlob: async url => {
+            if (blobDeletionFailure) throw blobDeletionFailure;
+            deletedBlobs.push(url);
+        },
         getBlob: async url => {
             readBlobs.push(url);
             return {
@@ -214,10 +218,22 @@ test("uploaded file metadata, project attachments, edits, and deletion persist",
     assert.equal(state.presentations[0].title, "Bruchrechnung");
     assert.equal(state.files[0].subject, "Physik");
 
+    blobDeletionFailure = new Error("Blob storage unavailable");
+    const failedDeletion = await api("/files/math-file", { method: "DELETE" });
+    blobDeletionFailure = null;
+    assert.equal(failedDeletion.status, 502);
+    assert.match((await json(failedDeletion)).error, /Dateieintrag bleibt erhalten/);
+    assert.deepEqual(deletedBlobs, []);
+    const stateAfterFailedDeletion = await json(await api("/state"));
+    assert.equal(stateAfterFailedDeletion.files[0].id, "math-file");
+    assert.deepEqual(stateAfterFailedDeletion.presentations[0].fileIds, ["math-file"]);
+
     const deletion = await api("/files/math-file", { method: "DELETE" });
     assert.equal(deletion.status, 204);
     assert.deepEqual(deletedBlobs, [blobUrl]);
-    assert.deepEqual((await json(await api("/state"))).files, []);
+    const stateAfterDeletion = await json(await api("/state"));
+    assert.deepEqual(stateAfterDeletion.files, []);
+    assert.deepEqual(stateAfterDeletion.presentations[0].fileIds, []);
 
     const deletedProject = await api(`/projects/${project.id}`, { method: "DELETE" });
     assert.equal(deletedProject.status, 204);
