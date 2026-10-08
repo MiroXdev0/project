@@ -20,7 +20,8 @@ export function addFile(
     if (details.content instanceof Blob) {
         return uploadSharedFile(details.content, {
             type,
-            subject
+            subject,
+            onUploadProgress: details.onUploadProgress
         });
     }
 

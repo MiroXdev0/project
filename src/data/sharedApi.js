@@ -1,11 +1,10 @@
-const configuredApiRoot = import.meta.env.VITE_API_URL?.trim();
-const API_ROOT = (configuredApiRoot || "/api").replace(/\/+$/, "");
+import { upload } from "@vercel/blob/client";
+
+const API_ROOT = "/api";
 const sharedData = {
     presentations: [],
     files: []
 };
-let eventSource;
-let refreshTimer;
 let refreshPromise;
 
 async function request(path, options = {}) {
@@ -17,7 +16,7 @@ async function request(path, options = {}) {
         });
     } catch (requestError) {
         throw new Error(
-            `Der gemeinsame Dateiserver ist nicht erreichbar. Prüfe die VITE_API_URL-Einstellung auf Vercel und ob der Node-Server läuft. (${requestError.message})`
+            `Die Vercel-API ist nicht erreichbar. Bitte prüfe den Bereitstellungsstatus. (${requestError.message})`
         );
     }
     if (!response.ok) {
@@ -27,14 +26,14 @@ async function request(path, options = {}) {
             if (typeof result.error === "string") message = result.error;
         } catch {
             if (response.status === 404 || response.headers.get("content-type")?.includes("text/html")) {
-                message = "Der gemeinsame Datei-Server ist unter dieser Adresse nicht eingerichtet. Vercel stellt nur die Website bereit; verbinde sie mit dem laufenden Node-Backend.";
+                message = "Die Vercel-API wurde nicht gefunden. Prüfe, ob die API-Funktionen mit der Website bereitgestellt wurden.";
             }
         }
         throw new Error(message);
     }
     if (response.status === 204) return null;
     if (!response.headers.get("content-type")?.includes("application/json")) {
-        throw new Error("Der gemeinsame Datei-Server hat keine API-Antwort geliefert. Prüfe die VITE_API_URL-Einstellung und den Backend-Status.");
+        throw new Error("Die Vercel-API hat keine gültige JSON-Antwort geliefert.");
     }
     return response.json();
 }
@@ -99,35 +98,50 @@ export async function deleteSharedPresentation(id) {
 }
 
 export async function uploadSharedFile(file, metadata) {
-    const formData = new FormData();
-    formData.set("file", file, file.name);
-    formData.set("type", metadata.type ?? "");
-    formData.set("subject", metadata.subject ?? "");
-    const result = await request("/files", {
-        method: "POST",
-        body: formData
+    const id = crypto.randomUUID();
+    const blob = await upload(`${id}-${file.name}`, file, {
+        access: "public",
+        contentType: file.type || "application/octet-stream",
+        handleUploadUrl: `${API_ROOT}/files/upload-token`,
+        multipart: file.size > 5 * 1024 * 1024,
+        onUploadProgress: metadata.onUploadProgress
     });
+    const result = await request("/files", jsonRequest("POST", {
+        id,
+        name: file.name,
+        type: metadata.type ?? "",
+        subject: metadata.subject ?? "",
+        mimeType: file.type || blob.contentType || "application/octet-stream",
+        size: file.size,
+        url: blob.url,
+        createdAt: Date.now()
+    }));
     mutateCollection("files", result);
     return result;
 }
 
 export async function migrateLegacyFile(file, content) {
-    const formData = new FormData();
-    formData.set("id", file.id);
-    formData.set("name", file.name ?? "datei");
-    formData.set("type", file.type ?? "");
-    formData.set("subject", file.subject ?? "");
-    formData.set("url", file.url ?? "");
-    formData.set("mimeType", file.mimeType ?? "");
-    formData.set("size", String(file.size ?? ""));
-    formData.set("createdAt", String(file.createdAt ?? ""));
+    let blobUrl = "";
     if (content instanceof Blob) {
-        formData.set("file", content, file.name ?? "datei");
+        const blob = await upload(`${file.id}-${file.name}`, content, {
+            access: "public",
+            contentType: content.type || file.mimeType || "application/octet-stream",
+            handleUploadUrl: `${API_ROOT}/files/upload-token`,
+            multipart: content.size > 5 * 1024 * 1024
+        });
+        blobUrl = blob.url;
     }
-    const result = await request("/migration/files", {
-        method: "POST",
-        body: formData
-    });
+    const result = await request("/migration/files", jsonRequest("POST", {
+        id: file.id,
+        name: file.name ?? "datei",
+        type: file.type ?? "",
+        subject: file.subject ?? "",
+        url: file.url ?? "",
+        blobUrl,
+        mimeType: content?.type || file.mimeType || "application/octet-stream",
+        size: content?.size ?? file.size ?? 0,
+        createdAt: file.createdAt ?? Date.now()
+    }));
     mutateCollection("files", result.file);
     return result;
 }
@@ -175,7 +189,7 @@ export async function fetchSharedFile(id, { download = false } = {}) {
         );
     } catch (requestError) {
         throw new Error(
-            `Der gemeinsame Dateiserver ist nicht erreichbar. Prüfe VITE_API_URL und den Backend-Status. (${requestError.message})`
+            `Die Datei konnte nicht aus Vercel Blob geladen werden. (${requestError.message})`
         );
     }
     if (!response.ok) {
@@ -192,35 +206,29 @@ export async function fetchSharedFile(id, { download = false } = {}) {
 }
 
 export function startSharedSync(onUpdate, onUnavailable) {
-    eventSource?.close();
-    eventSource = new EventSource(`${API_ROOT}/events`);
-    let hasConnected = false;
-    eventSource.onopen = () => {
-        hasConnected = true;
-        refreshSharedData()
-            .then(onUpdate)
-            .catch(onUnavailable);
-    };
-    eventSource.addEventListener("update", () => {
-        window.clearTimeout(refreshTimer);
-        refreshTimer = window.setTimeout(async () => {
-            try {
-                await refreshSharedData();
-                onUpdate();
-            } catch (syncError) {
-                console.error("[Schulorganizer] Gemeinsame Daten konnten nicht aktualisiert werden:", syncError);
+    let stopped = false;
+    let unavailable = false;
+    const refresh = async () => {
+        if (stopped) return;
+        try {
+            await refreshSharedData();
+            if (unavailable) unavailable = false;
+            onUpdate();
+        } catch (syncError) {
+            console.error("[Schulorganizer] Gemeinsame Daten konnten nicht aktualisiert werden:", syncError);
+            if (!unavailable) {
+                unavailable = true;
                 onUnavailable(syncError);
             }
-        }, 100);
-    });
-    eventSource.onerror = () => {
-        if (hasConnected) {
-            onUnavailable(new Error("Die Verbindung zu den gemeinsamen Daten wurde unterbrochen."));
         }
     };
+    const interval = window.setInterval(refresh, 5000);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
     return () => {
-        window.clearTimeout(refreshTimer);
-        eventSource?.close();
-        eventSource = null;
+        stopped = true;
+        window.clearInterval(interval);
+        window.removeEventListener("focus", refresh);
+        document.removeEventListener("visibilitychange", refresh);
     };
 }

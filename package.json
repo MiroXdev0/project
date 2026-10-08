@@ -4,19 +4,18 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node server.js",
+    "dev": "npx --yes vercel@63.1.0 dev",
     "build": "vite build",
-    "preview": "node server.js production",
-    "start": "node server.js production",
+    "migrate:sqlite": "node scripts/migrate-sqlite.js",
     "test": "node --test"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "vite": "^8.3.3"
   },
   "dependencies": {
     "@aiden0z/pptx-renderer": "^1.3.0",
-    "better-sqlite3": "^13.0.3",
-    "express": "^5.2.1",
-    "multer": "^2.4.0"
+    "@neondatabase/serverless": "^1.2.0",
+    "@vercel/blob": "^2.8.1"
   }
 }

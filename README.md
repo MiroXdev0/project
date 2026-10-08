@@ -1,79 +1,103 @@
 # Schulorganizer
 
-## Lokal starten
+Schulorganizer wird vollständig über Vercel bereitgestellt: Vercel hostet die
+Vite-Web-App und die API-Funktionen, Neon speichert gemeinsame Projekte und
+Dateimetadaten in PostgreSQL und Vercel Blob speichert die Originaldateien.
 
-Benötigt wird Node.js 22 oder neuer.
+## Voraussetzungen
+
+- Node.js 22 oder neuer (für `scripts/migrate-sqlite.js` wird Node.js 24 benötigt)
+- Ein Vercel-Projekt mit aktivierten **Neon**- und **Blob**-Speichern
+
+## Vercel einrichten und bereitstellen
+
+1. Das Repository als Vercel-Projekt importieren. Framework Preset **Vite**,
+   Build-Befehl `npm run build` und Ausgabeordner `dist` verwenden. Zusätzliche
+   Rewrites sind nicht nötig: Vercel stellt `api/[...path].js` als API-Funktion
+   und `dist` als Frontend unter derselben Domain bereit.
+2. Im Vercel-Projekt unter **Storage** eine Neon-PostgreSQL-Datenbank und einen
+   Vercel-Blob-Speicher verbinden. Beide Integrationen für Production, Preview
+   und Development aktivieren.
+3. Prüfen, dass folgende Umgebungsvariablen für die Vercel-Umgebungen gesetzt
+   sind:
+
+   | Variable | Zweck |
+   | --- | --- |
+   | `POSTGRES_URL` | Verbindungszeichenfolge für Neon PostgreSQL. Alternativ wird `DATABASE_URL` akzeptiert. |
+   | `BLOB_READ_WRITE_TOKEN` | Schreib-/Lesetoken des Vercel-Blob-Speichers. |
+
+   Vercel-Storage-Integrationen legen diese Variablen normalerweise automatisch
+   an. Eine Vorlage liegt in [`.env.example`](./.env.example).
+4. Änderungen auf `main` pushen oder im Projektverzeichnis `npx vercel --prod`
+   ausführen. Vercel baut die Website und veröffentlicht die API-Funktion im
+   selben Deployment.
+5. `https://<deine-domain>/api/health` muss `{"status":"ok"}` zurückgeben.
+
+Es gibt keine Render-Abhängigkeit, keinen dauerhaft laufenden Node-Server und
+keinen separaten API-Host. Im Browser werden gleich-originierte `/api/...`-
+Adressen verwendet. Die Tabellen werden beim ersten API-Aufruf in PostgreSQL
+angelegt.
+
+## Lokal entwickeln
 
 ```sh
 npm ci
+npx vercel login
+npx vercel link
+npx vercel env pull .env.local
 npm run dev
 ```
 
-Die Anwendung läuft unter `http://localhost:5173`. Im Entwicklungsmodus stellt
-der Node-Server die API auf Port 3001 bereit; Vite leitet `/api` dorthin weiter.
+`vercel dev` führt lokal sowohl die Vite-Seite als auch die API-Funktion aus.
+Alternativ können die Werte aus [`.env.example`](./.env.example) in `.env.local`
+eingetragen werden. Neon und Blob müssen dafür erreichbar und konfiguriert sein.
+Eine reine Vite-Vorschau (`vite preview`) stellt die API nicht bereit.
 
-## Bereitstellung mit gemeinsamen Projekten und Dateien
+## Daten und Migration
 
-Die Produktionsversion muss als Node-Webdienst gestartet werden (`npm start`).
-Der Server liefert dabei sowohl die Web-App als auch die API unter derselben
-Adresse aus. Eine rein statische Bereitstellung, zum Beispiel auf GitHub Pages,
-stellt die Datenbank-API nicht bereit und synchronisiert daher keine Projekte
-oder Dateien.
+- Projekte/Präsentationen, Datei-Metadaten und Verknüpfungen werden gemeinsam
+  in Neon gespeichert und nach Neuladen bzw. auf anderen Geräten über
+  `/api/state` geladen.
+- Datei-Inhalte werden direkt vom Browser nach Vercel Blob hochgeladen. Die
+  Datenbank speichert die Blob-Adresse und Metadaten; keine Datei wird dauerhaft
+  auf dem Vercel-Dateisystem oder in `localStorage` abgelegt.
+- Aufgaben, Notizen und Fächer verwenden weiterhin den vorhandenen
+  Browser-Speicher. Sie funktionieren lokal auf dem jeweiligen Gerät, werden
+  aber nicht zwischen Geräten synchronisiert.
+- Die App versucht beim Öffnen bisherige browserlokale Projekte und Dateien
+  samt Originalen aus `localStorage`/IndexedDB in die gemeinsame Datenbank und
+  Blob zu übernehmen. Jeder Browser, der nur dort gespeicherte Dateien enthält,
+  muss die aktualisierte App einmal öffnen, damit seine Inhalte übertragen
+  werden können.
+- Eine vorhandene SQLite-Serverdatenbank kann einmalig mit Node.js 24 migriert
+  werden. Zuerst `.env.local` mit `POSTGRES_URL` und `BLOB_READ_WRITE_TOKEN`
+  befüllen, dann ausführen:
 
-### Vercel-Frontend mit gemeinsamem Datei-Server
+  ```sh
+  npm run migrate:sqlite -- "C:\Pfad\zu\schulorganizer.sqlite"
+  ```
 
-Ein Vercel-Deployment, das nur `vite build` ausführt, hostet die statische Website,
-aber nicht den Express-/SQLite-Server. Damit Uploads eines Geräts auf anderen
-Geräten erscheinen, muss ein laufender Node-Server mit dauerhaftem Datenträger
-bereitstehen und das Vercel-Frontend auf dessen API zeigen:
+  Das Skript überträgt Projekte, Verknüpfungen, Metadaten und gespeicherte
+  Originaldateien nach PostgreSQL/Blob. Es verändert die SQLite-Quelldatei
+  nicht und kann erneut ausgeführt werden, ohne bereits migrierte Blob-Dateien
+  erneut hochzuladen. Vor der Migration sollte eine Sicherungskopie erstellt
+  werden.
 
-1. `render.yaml` als Blueprint in Render bereitstellen und die angezeigte
-   `APP_ORIGIN`-Variable auf die vollständige Vercel-Website-Adresse setzen,
-   zum Beispiel `https://schulorganizer.vercel.app`. Render stellt hierfür eine
-   dauerhafte SQLite-Festplatte bereit.
-2. Den tatsächlichen öffentlichen Service-Link aus dem Render-Dashboard öffnen
-   und prüfen, dass `<Service-Link>/api/health` `{"status":"ok"}` zurückgibt.
-3. In Vercel unter **Project → Settings → Environment Variables** die Variable
-   `VITE_API_URL` auf `<Service-Link>/api` setzen, zum Beispiel
-   `https://dein-service.onrender.com/api`, für alle benötigten Umgebungen.
-4. Eine neue Vercel-Bereitstellung auslösen. `VITE_API_URL` wird beim Build in
-   die Website übernommen.
-5. Auf beiden Geräten dieselbe Vercel-Adresse öffnen. Zum Prüfen des Backends
-   `<Service-Link>/api/state` direkt aufrufen; dort muss JSON erscheinen. Die
-   Adresse `/api/state` auf Vercel selbst wird bei direkter API-Konfiguration
-   nicht zum Backend weitergeleitet.
+## API und Grenzen
 
-Der Name `schulorganizer` in `render.yaml` ist nur der gewünschte Render-Service-
-Name; verwende immer den tatsächlich im Render-Dashboard angezeigten Link.
-Ohne diese beiden Einstellungen kann die Website Dateien lokal auswählen, aber
-der gemeinsame Server kann sie nicht speichern oder zwischen Geräten verteilen.
-
-Projekte, Datei-Metadaten und Originaldateien werden in einer SQLite-Datenbank
-gespeichert. `DATABASE_PATH` legt den Datenbankpfad fest; standardmäßig ist das
-`data/schulorganizer.sqlite`. In der Hosting-Umgebung muss dieser Pfad auf einem
-dauerhaft gespeicherten Laufwerk liegen, damit Daten Deployments und Neustarts
-überstehen. `render.yaml` enthält eine entsprechende Konfiguration für einen
-Node-Webdienst mit persistenter Festplatte. SQLite wird hier für einen einzelnen
-Serverprozess verwendet; mehrere unabhängige Serverinstanzen dürfen nicht
-jeweils ihre eigene lokale Datenbank verwenden.
-
-Alle Nutzer derselben Serverinstanz sehen denselben Projekt- und Dateibestand.
-Die Anwendung enthält derzeit keine Anmeldung oder Berechtigungen. Wer den
-Dienst öffentlich erreichbar macht, muss daher berücksichtigen, dass Nutzer
-gemeinsame Inhalte auch ändern oder löschen können.
-
-Uploads sind serverseitig auf 100 MB pro Datei begrenzt. Der Server stellt
-`GET /api/health` für einfache Statusprüfungen bereit.
-
-Beim ersten Öffnen der aktualisierten App versucht jeder Browser außerdem,
-bisher lokal gespeicherte Dateien samt Originalinhalten und Präsentationsprojekten
-auf den Server zu übertragen. Die App gleicht frühere Einträge auch bei späteren
-Starts ab, setzt unvollständige Übertragungen fort und ergänzt fehlende Originale
-oder Projektanhänge. Die lokalen Originaldaten bleiben dabei erhalten. Weil frühere
-Uploads ausschließlich im jeweiligen Browser gespeichert waren, muss jedes Gerät
-bzw. jeder Browser mit solchen Altdateien die aktualisierte App mindestens einmal
-öffnen, während der Server erreichbar ist. Die Übernahme ist wiederholbar und
-erzeugt bei einem erneuten Versuch keine doppelten Einträge.
+- `GET /api/health` prüft Datenbankverbindung und Schema.
+- `GET /api/state` liefert gemeinsame Projekte und Dateien.
+- API-Endpunkte für Projekte, Dateien, Dateilinks und Browsermigrationen werden
+  als Vercel-Funktion unter `/api` bereitgestellt.
+- Gemeinsame Änderungen werden alle fünf Sekunden abgefragt; servergesendete
+  Dauerverbindungen werden nicht benötigt.
+- Uploads sind auf 100 MB je Datei begrenzt. Der Browser lädt Dateien direkt
+  nach Blob, damit der Request nicht durch das Größenlimit einer Vercel Function
+  muss.
+- Die Anwendung hat weiterhin keine Anmeldung oder Benutzerrechte. Projekte
+  und öffentliche Blob-Dateien sind für jeden erreichbar, der die Website
+  aufrufen kann. Vor einem Einsatz mit vertraulichen Schülerdaten muss ein
+  passendes Authentifizierungs- und Berechtigungssystem ergänzt werden.
 
 ## Tests und Build
 

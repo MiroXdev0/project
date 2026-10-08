@@ -1,301 +1,247 @@
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { once } from "node:events";
-import { afterEach, test } from "node:test";
-import { createApiApp, createDatabase } from "../server.js";
+import { after, before, test } from "node:test";
+import { PGlite } from "@electric-sql/pglite";
+import { createApiHandler } from "../src/serverless/handler.js";
 
-const servers = [];
-const databases = [];
-const temporaryDirectories = [];
-const originalAppOrigin = process.env.APP_ORIGIN;
+let pg;
+let handler;
+const deletedBlobs = [];
+let uploadOptions;
 
-afterEach(async () => {
-    await Promise.all(servers.splice(0).map(server => new Promise(resolve => server.close(resolve))));
-    databases.splice(0).forEach(database => database.close());
-    temporaryDirectories.splice(0).forEach(directory => fs.rmSync(directory, { recursive: true, force: true }));
-    if (originalAppOrigin === undefined) {
-        delete process.env.APP_ORIGIN;
-    } else {
-        process.env.APP_ORIGIN = originalAppOrigin;
-    }
+before(async () => {
+    pg = new PGlite();
+    const database = {
+        query: (text, values = []) => pg.query(text, values),
+        transaction: async operation => {
+            await pg.query("BEGIN");
+            try {
+                const result = await operation({
+                    query: (text, values = []) => pg.query(text, values)
+                });
+                await pg.query("COMMIT");
+                return result;
+            } catch (error) {
+                await pg.query("ROLLBACK");
+                throw error;
+            }
+        }
+    };
+    handler = createApiHandler({
+        database,
+        deleteBlob: async url => deletedBlobs.push(url),
+        handleBlobUpload: async options => {
+            uploadOptions = options;
+            return { clientToken: "test-client-token" };
+        }
+    });
 });
 
-async function startApi() {
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "schulorganizer-api-"));
-    temporaryDirectories.push(directory);
-    const databasePath = path.join(directory, "data", "school.sqlite");
-    const database = createDatabase(databasePath);
-    databases.push(database);
-    const server = createApiApp(database).listen(0, "127.0.0.1");
-    servers.push(server);
-    await once(server, "listening");
-    return {
-        databasePath,
-        database,
-        baseUrl: `http://127.0.0.1:${server.address().port}`
-    };
+after(async () => {
+    await pg.close();
+});
+
+async function api(path, { method = "GET", body } = {}) {
+    const request = new Request(`https://school.test/api${path}`, {
+        method,
+        headers: body === undefined ? {} : { "Content-Type": "application/json" },
+        body: body === undefined ? undefined : JSON.stringify(body)
+    });
+    return handler(request);
 }
 
 async function json(response) {
-    return response.status === 204 ? null : response.json();
+    return response.json();
 }
 
-test("projects and original file bytes persist in SQLite and are shared by the API", async () => {
-    const api = await startApi();
-    const original = Buffer.from("original power point bytes \u0000");
-    const form = new FormData();
-    form.set("file", new Blob([original], {
-        type: "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-    }), "Referat.pptx");
-    form.set("type", "Präsentation");
-    form.set("subject", "Physik");
+test("health and state use the shared PostgreSQL schema", async () => {
+    const health = await api("/health");
+    assert.equal(health.status, 200);
+    assert.deepEqual(await json(health), { status: "ok" });
 
-    const uploadResponse = await fetch(`${api.baseUrl}/api/files`, { method: "POST", body: form });
-    assert.equal(uploadResponse.status, 201);
-    const file = await uploadResponse.json();
-    assert.equal(file.name, "Referat.pptx");
-    assert.equal(file.size, original.length);
-    assert.equal(file.subject, "Physik");
-
-    const projectResponse = await fetch(`${api.baseUrl}/api/projects`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            title: "Klimawandel",
-            subject: "Physik",
-            description: "Schülerprojekt mit Originalpräsentation.",
-            fileIds: [file.id]
-        })
-    });
-    assert.equal(projectResponse.status, 201);
-    const project = await projectResponse.json();
-
-    const state = await fetch(`${api.baseUrl}/api/state`, { cache: "no-store" }).then(json);
-    assert.deepEqual(state.presentations[0].fileIds, [file.id]);
-    assert.equal(state.presentations[0].title, "Klimawandel");
-    assert.deepEqual(state.files[0], { ...file, hasContent: true });
-    assert.equal(JSON.stringify(state).includes(original.toString()), false);
-
-    const contentResponse = await fetch(`${api.baseUrl}/api/files/${file.id}/content`);
-    assert.equal(contentResponse.headers.get("content-type"), file.mimeType);
-    assert.deepEqual(Buffer.from(await contentResponse.arrayBuffer()), original);
-
-    const downloadResponse = await fetch(`${api.baseUrl}/api/files/${file.id}/content?download=1`);
-    assert.match(downloadResponse.headers.get("content-disposition"), /^attachment;/);
-    assert.deepEqual(Buffer.from(await downloadResponse.arrayBuffer()), original);
-
-    await new Promise(resolve => {
-        const server = servers[0];
-        server.close(resolve);
-        servers.length = 0;
-    });
-    api.database.close();
-    databases.splice(databases.indexOf(api.database), 1);
-
-    const reopenedDatabase = createDatabase(api.databasePath);
-    databases.push(reopenedDatabase);
-    const reopenedServer = createApiApp(reopenedDatabase).listen(0, "127.0.0.1");
-    servers.push(reopenedServer);
-    await once(reopenedServer, "listening");
-    const reopenedUrl = `http://127.0.0.1:${reopenedServer.address().port}`;
-    const reopenedState = await fetch(`${reopenedUrl}/api/state`).then(json);
-    assert.equal(reopenedState.presentations[0].id, project.id);
-    assert.deepEqual(reopenedState.presentations[0].fileIds, [file.id]);
-    assert.deepEqual(
-        Buffer.from(await (await fetch(`${reopenedUrl}/api/files/${file.id}/content`)).arrayBuffer()),
-        original
-    );
+    const state = await api("/state");
+    assert.equal(state.status, 200);
+    assert.deepEqual(await json(state), { presentations: [], files: [] });
+    assert.equal(state.headers.get("cache-control"), "no-store");
 });
 
-test("server changes notify connected clients and deleting projects preserves their files", async () => {
-    const { baseUrl } = await startApi();
-    const events = await fetch(`${baseUrl}/api/events`);
-    assert.equal(events.status, 200);
-    const reader = events.body.getReader();
-
-    const createResponse = await fetch(`${baseUrl}/api/projects`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: "Gemeinsames Projekt", fileIds: [] })
-    });
-    assert.equal(createResponse.status, 201);
-    const project = await createResponse.json();
-
-    let eventText = "";
-    while (!eventText.includes("event: update")) {
-        const chunk = await reader.read();
-        if (chunk.done) break;
-        eventText += new TextDecoder().decode(chunk.value);
+test("Blob upload tokens constrain file types and size", async () => {
+    const previousToken = process.env.BLOB_READ_WRITE_TOKEN;
+    process.env.BLOB_READ_WRITE_TOKEN = "test-token";
+    try {
+        const response = await api("/files/upload-token", {
+            method: "POST",
+            body: { type: "blob.generate-client-token", payload: "{}" }
+        });
+        assert.equal(response.status, 200);
+        assert.deepEqual(await json(response), { clientToken: "test-client-token" });
+        assert.equal(uploadOptions.token, "test-token");
+        assert.equal(uploadOptions.request.url, "https://school.test/api/files/upload-token");
+        const constraints = await uploadOptions.onBeforeGenerateToken("upload.pptx");
+        assert.equal(constraints.maximumSizeInBytes, 100 * 1024 * 1024);
+        assert.ok(constraints.allowedContentTypes.includes("application/*"));
+    } finally {
+        if (previousToken === undefined) delete process.env.BLOB_READ_WRITE_TOKEN;
+        else process.env.BLOB_READ_WRITE_TOKEN = previousToken;
     }
-    assert.match(eventText, /event: update/);
-
-    const updateResponse = await fetch(`${baseUrl}/api/projects/${project.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            title: "Projekt synchronisiert",
-            description: "Von einem anderen Browser aktualisiert.",
-            fileIds: []
-        })
-    });
-    assert.equal(updateResponse.status, 200);
-    assert.equal((await updateResponse.json()).title, "Projekt synchronisiert");
-
-    await reader.cancel();
-    assert.equal((await fetch(`${baseUrl}/api/projects/not-a-project`, { method: "DELETE" })).status, 404);
-    assert.equal((await fetch(`${baseUrl}/api/projects/${project.id}`, { method: "DELETE" })).status, 204);
-    const state = await fetch(`${baseUrl}/api/state`).then(json);
-    assert.deepEqual(state.presentations, []);
 });
 
-test("invalid project references and missing uploads return clear client errors", async () => {
-    const { baseUrl } = await startApi();
-    const missingFile = await fetch(`${baseUrl}/api/projects`, {
+test("uploaded file metadata, project attachments, edits, and deletion persist", async () => {
+    const blobUrl = "https://school.public.blob.vercel-storage.com/math.pdf";
+    const fileResponse = await api("/files", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: "Ungültiger Verweis", fileIds: ["missing-file"] })
-    });
-    assert.equal(missingFile.status, 400);
-    assert.match((await missingFile.json()).error, /Datei wurde nicht gefunden/);
-
-    const missingUpload = await fetch(`${baseUrl}/api/files`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "fehlt.pptx" })
-    });
-    assert.equal(missingUpload.status, 400);
-    assert.match((await missingUpload.json()).error, /keine Datei übertragen/);
-});
-
-test("API permits the configured Vercel origin and rejects unconfigured browser origins", async () => {
-    process.env.APP_ORIGIN = "https://school.example,https://www.school.example";
-    const { baseUrl } = await startApi();
-    const allowed = await fetch(`${baseUrl}/api/state`, {
-        headers: { Origin: "https://school.example" }
-    });
-    assert.equal(allowed.status, 200);
-    assert.equal(allowed.headers.get("access-control-allow-origin"), "https://school.example");
-
-    const preflight = await fetch(`${baseUrl}/api/files`, {
-        method: "OPTIONS",
-        headers: {
-            Origin: "https://school.example",
-            "Access-Control-Request-Method": "POST",
-            "Access-Control-Request-Headers": "content-type"
+        body: {
+            id: "math-file",
+            name: "Mathe.pdf",
+            type: "PDF",
+            subject: "Mathematik",
+            mimeType: "application/pdf",
+            size: 1024,
+            url: blobUrl,
+            createdAt: 100
         }
     });
-    assert.equal(preflight.status, 204);
-    assert.equal(preflight.headers.get("access-control-allow-methods"), "GET, POST, PUT, DELETE, OPTIONS");
+    assert.equal(fileResponse.status, 201);
+    assert.deepEqual(await json(fileResponse), {
+        id: "math-file",
+        name: "Mathe.pdf",
+        type: "PDF",
+        subject: "Mathematik",
+        url: blobUrl,
+        mimeType: "application/pdf",
+        size: 1024,
+        createdAt: 100,
+        hasContent: true
+    });
 
-    const upload = new FormData();
-    upload.set("file", new Blob(["shared from another device"], { type: "text/plain" }), "cross-device.txt");
-    const uploadResponse = await fetch(`${baseUrl}/api/files`, {
+    const invalidFile = await api("/files", {
         method: "POST",
-        headers: { Origin: "https://school.example" },
-        body: upload
+        body: {
+            id: "invalid",
+            name: "bad.pdf",
+            size: 1,
+            url: "https://example.com/file.pdf"
+        }
     });
-    assert.equal(uploadResponse.status, 201);
-    assert.equal(uploadResponse.headers.get("access-control-allow-origin"), "https://school.example");
+    assert.equal(invalidFile.status, 400);
 
-    const otherDeviceState = await fetch(`${baseUrl}/api/state`, {
-        headers: { Origin: "https://www.school.example" }
-    }).then(json);
-    assert.equal(otherDeviceState.files[0].name, "cross-device.txt");
-
-    const eventStream = await fetch(`${baseUrl}/api/events`, {
-        headers: { Origin: "https://school.example" }
+    const projectResponse = await api("/projects", {
+        method: "POST",
+        body: {
+            title: "Bruchrechnung",
+            subject: "Mathematik",
+            description: "Präsentation",
+            fileIds: ["math-file"]
+        }
     });
-    assert.equal(eventStream.headers.get("access-control-allow-origin"), "https://school.example");
-    await eventStream.body.cancel();
+    assert.equal(projectResponse.status, 201);
+    const project = await json(projectResponse);
+    assert.deepEqual(project.fileIds, ["math-file"]);
 
-    const denied = await fetch(`${baseUrl}/api/state`, {
-        headers: { Origin: "https://unrelated.example" }
+    const contentResponse = await api("/files/math-file/content");
+    assert.equal(contentResponse.status, 302);
+    assert.equal(contentResponse.headers.get("location"), blobUrl);
+
+    const update = await api("/files/math-file", {
+        method: "PUT",
+        body: { subject: "Physik" }
     });
-    assert.equal(denied.status, 403);
-    assert.match((await denied.json()).error, /APP_ORIGIN/);
+    assert.equal(update.status, 200);
+    const updatedFile = await json(update);
+    assert.equal(updatedFile.subject, "Physik");
+    assert.equal(updatedFile.url, blobUrl);
+    assert.equal(updatedFile.hasContent, true);
+
+    const state = await json(await api("/state"));
+    assert.equal(state.presentations[0].title, "Bruchrechnung");
+    assert.equal(state.files[0].subject, "Physik");
+
+    const deletion = await api("/files/math-file", { method: "DELETE" });
+    assert.equal(deletion.status, 204);
+    assert.deepEqual(deletedBlobs, [blobUrl]);
+    assert.deepEqual((await json(await api("/state"))).files, []);
+
+    const deletedProject = await api(`/projects/${project.id}`, { method: "DELETE" });
+    assert.equal(deletedProject.status, 204);
 });
 
-test("legacy files and projects migrate with their original IDs and without duplicates", async () => {
-    const { baseUrl } = await startApi();
-    const original = Buffer.from("legacy presentation bytes");
-    const fileForm = new FormData();
-    fileForm.set("id", "legacy-file-id");
-    fileForm.set("name", "Altes Referat.pptx");
-    fileForm.set("type", "Präsentation");
-    fileForm.set("subject", "Deutsch");
-    fileForm.set("mimeType", "application/vnd.openxmlformats-officedocument.presentationml.presentation");
-    fileForm.set("createdAt", "1700000000000");
-
-    const metadataImport = await fetch(`${baseUrl}/api/migration/files`, {
+test("external file links accept HTTP(S) only", async () => {
+    const invalid = await api("/file-links", {
         method: "POST",
-        body: fileForm
+        body: { name: "Gefährlich", url: "javascript:alert(1)" }
     });
-    assert.equal(metadataImport.status, 201);
-    assert.equal((await metadataImport.json()).migrated, true);
+    assert.equal(invalid.status, 400);
 
-    const repairForm = new FormData();
-    repairForm.set("id", "legacy-file-id");
-    repairForm.set("name", "Altes Referat.pptx");
-    repairForm.set("mimeType", "application/vnd.openxmlformats-officedocument.presentationml.presentation");
-    repairForm.set("file", new Blob([original]), "Altes Referat.pptx");
-    const repairedFile = await fetch(`${baseUrl}/api/migration/files`, {
+    const valid = await api("/file-links", {
         method: "POST",
-        body: repairForm
+        body: { name: "Schulbuch", type: "Link", url: "https://example.org/book" }
     });
-    assert.equal(repairedFile.status, 200);
-    assert.equal((await repairedFile.json()).repaired, true);
+    assert.equal(valid.status, 201);
+    const file = await json(valid);
+    assert.equal(file.url, "https://example.org/book");
+    assert.equal(file.hasContent, false);
+});
 
-    const duplicateForm = new FormData();
-    duplicateForm.set("id", "legacy-file-id");
-    duplicateForm.set("name", "Altes Referat.pptx");
-    const duplicateImport = await fetch(`${baseUrl}/api/migration/files`, {
+test("legacy file and presentation migration is repeatable and repairs attachments", async () => {
+    const blobUrl = "https://school.public.blob.vercel-storage.com/legacy.pdf";
+    const imported = await api("/migration/files", {
         method: "POST",
-        body: duplicateForm
+        body: {
+            id: "legacy-file",
+            name: "Alt.pdf",
+            type: "PDF",
+            subject: "Deutsch",
+            blobUrl,
+            mimeType: "application/pdf",
+            size: 500,
+            createdAt: 50
+        }
     });
-    assert.equal(duplicateImport.status, 200);
-    assert.equal((await duplicateImport.json()).repaired, false);
+    assert.equal(imported.status, 201);
+    assert.equal((await json(imported)).migrated, true);
 
-    const projectPayload = {
-        id: "legacy-project-id",
-        title: "Altes Deutschreferat",
+    const duplicate = await api("/migration/files", {
+        method: "POST",
+        body: {
+            id: "legacy-file",
+            name: "Alt.pdf",
+            blobUrl,
+            mimeType: "application/pdf",
+            size: 500
+        }
+    });
+    assert.equal((await json(duplicate)).migrated, false);
+
+    const project = {
+        id: "legacy-project",
+        title: "Referat",
         subject: "Deutsch",
-        description: "Vor dem Server-Update erstellt.",
-        createdAt: 1700000000000,
-        fileIds: ["legacy-file-id"]
+        fileIds: ["legacy-file"]
     };
-    const projectWithoutAttachment = await fetch(`${baseUrl}/api/migration/projects`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...projectPayload, fileIds: [] })
-    });
-    assert.equal(projectWithoutAttachment.status, 201);
-    assert.equal((await projectWithoutAttachment.json()).migrated, true);
+    const firstProject = await api("/migration/projects", { method: "POST", body: project });
+    assert.equal(firstProject.status, 201);
+    assert.equal((await json(firstProject)).migrated, true);
 
-    const repairedProject = await fetch(`${baseUrl}/api/migration/projects`, {
+    const repaired = await api("/migration/projects", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(projectPayload)
+        body: { ...project, fileIds: ["legacy-file", "later-file"] }
     });
-    assert.equal(repairedProject.status, 200);
-    assert.equal((await repairedProject.json()).repaired, true);
+    assert.equal(repaired.status, 400);
 
-    const duplicateProjectImport = await fetch(`${baseUrl}/api/migration/projects`, {
+    const laterFile = await api("/files", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(projectPayload)
+        body: {
+            id: "later-file",
+            name: "Bild.png",
+            size: 2,
+            url: "https://school.public.blob.vercel-storage.com/bild.png"
+        }
     });
-    assert.equal(duplicateProjectImport.status, 200);
-    assert.equal((await duplicateProjectImport.json()).repaired, false);
-
-    const state = await fetch(`${baseUrl}/api/state`).then(json);
-    assert.equal(state.files.length, 1);
-    assert.equal(state.files[0].hasContent, true);
-    assert.equal(state.presentations.length, 1);
-    assert.deepEqual(state.presentations[0].fileIds, ["legacy-file-id"]);
-    assert.deepEqual(
-        Buffer.from(await (await fetch(`${baseUrl}/api/files/legacy-file-id/content`)).arrayBuffer()),
-        original
-    );
+    assert.equal(laterFile.status, 201);
+    const repairedProject = await api("/migration/projects", {
+        method: "POST",
+        body: { ...project, fileIds: ["legacy-file", "later-file"] }
+    });
+    assert.equal((await json(repairedProject)).repaired, true);
+    assert.deepEqual((await json(await api("/state"))).presentations
+        .find(item => item.id === project.id).fileIds, ["legacy-file", "later-file"]);
 });
