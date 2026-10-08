@@ -39,11 +39,13 @@ Uploads sind serverseitig auf 100 MB pro Datei begrenzt. Der Server stellt
 
 Beim ersten Öffnen der aktualisierten App versucht jeder Browser außerdem,
 bisher lokal gespeicherte Dateien samt Originalinhalten und Präsentationsprojekten
-einmalig auf den Server zu übertragen. Die lokalen Originaldaten bleiben dabei
-erhalten. Weil frühere Uploads ausschließlich im jeweiligen Browser gespeichert
-waren, muss jedes Gerät bzw. jeder Browser mit solchen Altdateien die aktualisierte
-App mindestens einmal öffnen, während der Server erreichbar ist. Die Übernahme ist
-wiederholbar und erzeugt bei einem erneuten Versuch keine doppelten Einträge.
+auf den Server zu übertragen. Die App gleicht frühere Einträge auch bei späteren
+Starts ab, setzt unvollständige Übertragungen fort und ergänzt fehlende Originale
+oder Projektanhänge. Die lokalen Originaldaten bleiben dabei erhalten. Weil frühere
+Uploads ausschließlich im jeweiligen Browser gespeichert waren, muss jedes Gerät
+bzw. jeder Browser mit solchen Altdateien die aktualisierte App mindestens einmal
+öffnen, während der Server erreichbar ist. Die Übernahme ist wiederholbar und
+erzeugt bei einem erneuten Versuch keine doppelten Einträge.
 
 ## Tests und Build
 

@@ -69,7 +69,7 @@ test("projects and original file bytes persist in SQLite and are shared by the A
     const state = await fetch(`${api.baseUrl}/api/state`, { cache: "no-store" }).then(json);
     assert.deepEqual(state.presentations[0].fileIds, [file.id]);
     assert.equal(state.presentations[0].title, "Klimawandel");
-    assert.deepEqual(state.files[0], file);
+    assert.deepEqual(state.files[0], { ...file, hasContent: true });
     assert.equal(JSON.stringify(state).includes(original.toString()), false);
 
     const contentResponse = await fetch(`${api.baseUrl}/api/files/${file.id}/content`);
@@ -173,25 +173,35 @@ test("legacy files and projects migrate with their original IDs and without dupl
     fileForm.set("subject", "Deutsch");
     fileForm.set("mimeType", "application/vnd.openxmlformats-officedocument.presentationml.presentation");
     fileForm.set("createdAt", "1700000000000");
-    fileForm.set("file", new Blob([original]), "Altes Referat.pptx");
 
-    const firstImport = await fetch(`${baseUrl}/api/migration/files`, {
+    const metadataImport = await fetch(`${baseUrl}/api/migration/files`, {
         method: "POST",
         body: fileForm
     });
-    assert.equal(firstImport.status, 201);
-    assert.equal((await firstImport.json()).migrated, true);
+    assert.equal(metadataImport.status, 201);
+    assert.equal((await metadataImport.json()).migrated, true);
+
+    const repairForm = new FormData();
+    repairForm.set("id", "legacy-file-id");
+    repairForm.set("name", "Altes Referat.pptx");
+    repairForm.set("mimeType", "application/vnd.openxmlformats-officedocument.presentationml.presentation");
+    repairForm.set("file", new Blob([original]), "Altes Referat.pptx");
+    const repairedFile = await fetch(`${baseUrl}/api/migration/files`, {
+        method: "POST",
+        body: repairForm
+    });
+    assert.equal(repairedFile.status, 200);
+    assert.equal((await repairedFile.json()).repaired, true);
 
     const duplicateForm = new FormData();
     duplicateForm.set("id", "legacy-file-id");
     duplicateForm.set("name", "Altes Referat.pptx");
-    duplicateForm.set("file", new Blob(["duplicate"]), "Altes Referat.pptx");
     const duplicateImport = await fetch(`${baseUrl}/api/migration/files`, {
         method: "POST",
         body: duplicateForm
     });
     assert.equal(duplicateImport.status, 200);
-    assert.equal((await duplicateImport.json()).migrated, false);
+    assert.equal((await duplicateImport.json()).repaired, false);
 
     const projectPayload = {
         id: "legacy-project-id",
@@ -201,13 +211,21 @@ test("legacy files and projects migrate with their original IDs and without dupl
         createdAt: 1700000000000,
         fileIds: ["legacy-file-id"]
     };
-    const projectImport = await fetch(`${baseUrl}/api/migration/projects`, {
+    const projectWithoutAttachment = await fetch(`${baseUrl}/api/migration/projects`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...projectPayload, fileIds: [] })
+    });
+    assert.equal(projectWithoutAttachment.status, 201);
+    assert.equal((await projectWithoutAttachment.json()).migrated, true);
+
+    const repairedProject = await fetch(`${baseUrl}/api/migration/projects`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(projectPayload)
     });
-    assert.equal(projectImport.status, 201);
-    assert.equal((await projectImport.json()).migrated, true);
+    assert.equal(repairedProject.status, 200);
+    assert.equal((await repairedProject.json()).repaired, true);
 
     const duplicateProjectImport = await fetch(`${baseUrl}/api/migration/projects`, {
         method: "POST",
@@ -215,10 +233,11 @@ test("legacy files and projects migrate with their original IDs and without dupl
         body: JSON.stringify(projectPayload)
     });
     assert.equal(duplicateProjectImport.status, 200);
-    assert.equal((await duplicateProjectImport.json()).migrated, false);
+    assert.equal((await duplicateProjectImport.json()).repaired, false);
 
     const state = await fetch(`${baseUrl}/api/state`).then(json);
     assert.equal(state.files.length, 1);
+    assert.equal(state.files[0].hasContent, true);
     assert.equal(state.presentations.length, 1);
     assert.deepEqual(state.presentations[0].fileIds, ["legacy-file-id"]);
     assert.deepEqual(

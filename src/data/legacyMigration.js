@@ -1,9 +1,12 @@
 import {
+    getSharedFiles,
+    getSharedPresentations,
     migrateLegacyFile,
     migrateLegacyPresentation
 } from "./sharedApi.js";
 
 const migrationKey = "schulorganizer_shared_migration_v1";
+const migratedRecordsKey = "schulorganizer_shared_migration_records_v1";
 const legacyDatabaseName = "schulorganizer-files";
 const legacyStoreName = "files";
 
@@ -61,10 +64,6 @@ function readLegacyFiles(fileIds) {
 }
 
 export async function migrateLegacySharedData() {
-    if (localStorage.getItem(migrationKey) === "complete") {
-        return { files: 0, presentations: 0 };
-    }
-
     const legacyFiles = readLegacyList("files");
     const legacyPresentations = readLegacyList("presentations");
     if (legacyFiles.length === 0 && legacyPresentations.length === 0) {
@@ -72,8 +71,28 @@ export async function migrateLegacySharedData() {
         return { files: 0, presentations: 0 };
     }
 
+    const storedRecords = localStorage.getItem(migratedRecordsKey);
+    const migratedRecords = storedRecords
+        ? JSON.parse(storedRecords)
+        : { files: [], presentations: [] };
+    if (!Array.isArray(migratedRecords.files) || !Array.isArray(migratedRecords.presentations)) {
+        throw new Error("Der lokale Fortschritt für die Dateiübernahme ist beschädigt.");
+    }
+    const migratedFileIds = new Set(migratedRecords.files);
+    const migratedPresentationIds = new Set(migratedRecords.presentations);
+    const serverFiles = new Map(getSharedFiles().map(file => [file.id, file]));
+    const serverPresentations = new Map(
+        getSharedPresentations().map(presentation => [presentation.id, presentation])
+    );
+
     const contents = await readLegacyFiles(
-        legacyFiles.filter(file => typeof file.id === "string").map(file => file.id)
+        legacyFiles
+            .filter(file => {
+                const serverFile = serverFiles.get(file.id);
+                return !file.url && !serverFile?.hasContent;
+            })
+            .filter(file => typeof file.id === "string")
+            .map(file => file.id)
     );
     let importedFiles = 0;
     let importedPresentations = 0;
@@ -82,18 +101,55 @@ export async function migrateLegacySharedData() {
         if (typeof file.id !== "string" || !file.id || typeof file.name !== "string") {
             throw new Error("Eine frühere Datei hat keine gültige ID oder keinen Dateinamen.");
         }
-        const result = await migrateLegacyFile(file, contents.get(file.id));
-        if (result.migrated) importedFiles += 1;
+        const serverFile = serverFiles.get(file.id);
+        if (migratedFileIds.has(file.id) && !serverFile) continue;
+        if (serverFile?.hasContent || (serverFile && file.url)) {
+            migratedFileIds.add(file.id);
+            continue;
+        }
+        const content = contents.get(file.id);
+        if (!file.url && !content) {
+            throw new Error(`Der Originalinhalt von „${file.name}“ ist im früheren Gerätespeicher nicht verfügbar. Die Datei wurde nicht als übernommen markiert.`);
+        }
+        const result = await migrateLegacyFile(file, content);
+        if (result.migrated || result.repaired) importedFiles += 1;
+        migratedFileIds.add(file.id);
+        localStorage.setItem(migratedRecordsKey, JSON.stringify({
+            files: [...migratedFileIds],
+            presentations: [...migratedPresentationIds]
+        }));
     }
     for (const presentation of legacyPresentations) {
         if (typeof presentation.id !== "string" || !presentation.id ||
             typeof presentation.title !== "string" || !presentation.title.trim()) {
             throw new Error("Ein früheres Projekt hat keine gültige ID oder keinen Titel.");
         }
+        const legacyFileIds = Array.isArray(presentation.fileIds)
+            ? presentation.fileIds.filter(fileId => typeof fileId === "string")
+            : [];
+        const serverPresentation = serverPresentations.get(presentation.id);
+        if (migratedPresentationIds.has(presentation.id) && !serverPresentation) continue;
+        const attachedFileIds = new Set(serverPresentation?.fileIds ?? []);
+        const missingFileIds = legacyFileIds.filter(
+            fileId => !attachedFileIds.has(fileId)
+        );
+        if (serverPresentation && missingFileIds.length === 0) {
+            migratedPresentationIds.add(presentation.id);
+            continue;
+        }
         const result = await migrateLegacyPresentation(presentation);
-        if (result.migrated) importedPresentations += 1;
+        if (result.migrated || result.repaired) importedPresentations += 1;
+        migratedPresentationIds.add(presentation.id);
+        localStorage.setItem(migratedRecordsKey, JSON.stringify({
+            files: [...migratedFileIds],
+            presentations: [...migratedPresentationIds]
+        }));
     }
 
+    localStorage.setItem(migratedRecordsKey, JSON.stringify({
+        files: [...migratedFileIds],
+        presentations: [...migratedPresentationIds]
+    }));
     localStorage.setItem(migrationKey, "complete");
     return { files: importedFiles, presentations: importedPresentations };
 }

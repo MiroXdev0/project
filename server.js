@@ -85,9 +85,12 @@ function getState(database) {
     ).all();
     const files = database.prepare(`
         SELECT id, name, type, subject, url, mime_type AS mimeType,
-               size, created_at AS createdAt
+               size, created_at AS createdAt, content IS NOT NULL AS hasContent
         FROM files ORDER BY created_at DESC
     `).all();
+    files.forEach(file => {
+        file.hasContent = Boolean(file.hasContent);
+    });
 
     const fileIds = new Map();
     projectFiles.forEach(({ projectId, fileId }) => {
@@ -327,31 +330,53 @@ export function createApiApp(database) {
             type: cleanText(request.body.type, 40) || "Sonstiges",
             subject: cleanText(request.body.subject, 100),
             url: cleanText(request.body.url, 2048),
-            mimeType: request.file
-                ? cleanText(request.file.mimetype, 150) || "application/octet-stream"
+            mimeType: request.file && request.file.mimetype !== "application/octet-stream"
+                ? cleanText(request.file.mimetype, 150)
                 : cleanText(request.body.mimeType, 150) || "application/octet-stream",
-            size: request.file?.size ?? (Number(request.body.size) || null),
+            size: request.file?.size ?? (
+                Number.isFinite(Number(request.body.size)) && Number(request.body.size) >= 0
+                    ? Number(request.body.size)
+                    : 0
+            ),
             createdAt: Number(request.body.createdAt) || Date.now()
         };
         try {
-            const inserted = database.prepare(`
-                INSERT OR IGNORE INTO files (id, name, type, subject, url, mime_type, size, created_at, content)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `).run(
-                file.id,
-                file.name,
-                file.type,
-                file.subject,
-                file.url,
-                file.mimeType,
-                file.size,
-                file.createdAt,
-                request.file?.buffer ?? null
-            );
-            if (inserted.changes) publishUpdate();
-            response.status(inserted.changes ? 201 : 200).json({
+            const migrate = database.transaction(() => {
+                const existing = database.prepare(
+                    "SELECT content IS NOT NULL AS hasContent FROM files WHERE id = ?"
+                ).get(id);
+                if (existing) {
+                    const repaired = !existing.hasContent && request.file
+                        ? database.prepare(`
+                            UPDATE files
+                            SET content = ?, size = ?, mime_type = ?
+                            WHERE id = ? AND content IS NULL
+                        `).run(request.file.buffer, request.file.size, file.mimeType, id).changes > 0
+                        : false;
+                    return { migrated: false, repaired };
+                }
+
+                database.prepare(`
+                    INSERT INTO files (id, name, type, subject, url, mime_type, size, created_at, content)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                `).run(
+                    file.id,
+                    file.name,
+                    file.type,
+                    file.subject,
+                    file.url,
+                    file.mimeType,
+                    file.size,
+                    file.createdAt,
+                    request.file?.buffer ?? null
+                );
+                return { migrated: true, repaired: false };
+            });
+            const result = migrate();
+            if (result.migrated || result.repaired) publishUpdate();
+            response.status(result.migrated ? 201 : 200).json({
                 file: getFile(database, id),
-                migrated: Boolean(inserted.changes)
+                ...result
             });
         } catch (error) {
             console.error("[Schulorganizer] Alte Datei konnte nicht übernommen werden:", error);
@@ -397,14 +422,24 @@ export function createApiApp(database) {
                 );
                 if (inserted.changes) {
                     fileIds.forEach(fileId => insertProjectFiles.run(id, fileId));
+                    return { migrated: true, repaired: false };
                 }
-                return Boolean(inserted.changes);
+                const existingFileIds = new Set(database.prepare(
+                    "SELECT file_id FROM project_files WHERE project_id = ?"
+                ).all(id).map(row => row.file_id));
+                const missingFileIds = fileIds.filter(fileId => !existingFileIds.has(fileId));
+                missingFileIds.forEach(fileId => insertProjectFiles.run(id, fileId));
+                if (missingFileIds.length) {
+                    database.prepare("UPDATE projects SET updated_at = ? WHERE id = ?")
+                        .run(Date.now(), id);
+                }
+                return { migrated: false, repaired: missingFileIds.length > 0 };
             });
-            const migrated = insert();
-            if (migrated) publishUpdate();
-            response.status(migrated ? 201 : 200).json({
+            const result = insert();
+            if (result.migrated || result.repaired) publishUpdate();
+            response.status(result.migrated ? 201 : 200).json({
                 project: getProject(database, id),
-                migrated
+                ...result
             });
         } catch (error) {
             response.status(error.status ?? 500).json({
@@ -435,7 +470,7 @@ export function createApiApp(database) {
             subject: cleanText(request.body.subject, 100),
             url: parsedUrl.href,
             mimeType: "",
-            size: null,
+            size: 0,
             createdAt: Date.now()
         };
         database.prepare(`
