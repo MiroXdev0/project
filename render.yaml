@@ -16,4 +16,4 @@ services:
       - key: DATABASE_PATH
         value: /var/data/schulorganizer.sqlite
       - key: APP_ORIGIN
-        sync: false
+        value: https://schulorganizer.vercel.app
