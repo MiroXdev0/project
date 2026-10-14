@@ -1,6 +1,3 @@
-import { upload } from "@vercel/blob/client";
-import { BLOB_ACCESS } from "./blobAccess.js";
-
 const API_ROOT = "/api";
 const sharedData = {
     presentations: [],
@@ -107,11 +104,10 @@ export async function deleteSharedPresentation(id) {
 export async function uploadSharedFile(file, metadata) {
     const id = crypto.randomUUID();
     const contentType = getUploadContentType(file);
-    const blob = await upload(`${id}-${file.name}`, file, {
-        access: BLOB_ACCESS,
+    const storageKey = await uploadToNeonStorage(file, {
+        id,
+        name: file.name,
         contentType,
-        handleUploadUrl: `${API_ROOT}/files/upload-token`,
-        multipart: file.size > 5 * 1024 * 1024,
         onUploadProgress: metadata.onUploadProgress
     });
     const result = await request("/files", jsonRequest("POST", {
@@ -119,9 +115,9 @@ export async function uploadSharedFile(file, metadata) {
         name: file.name,
         type: metadata.type ?? "",
         subject: metadata.subject ?? "",
-        mimeType: contentType || blob.contentType || "application/octet-stream",
+        mimeType: contentType,
         size: file.size,
-        url: blob.url,
+        storageKey,
         createdAt: Date.now()
     }));
     mutateCollection("files", result);
@@ -129,19 +125,17 @@ export async function uploadSharedFile(file, metadata) {
 }
 
 export async function migrateLegacyFile(file, content) {
-    let blobUrl = "";
+    let storageKey = "";
     if (content instanceof Blob) {
         const contentType = getUploadContentType(
             { name: file.name, type: content.type },
             file.mimeType
         );
-        const blob = await upload(`${file.id}-${file.name}`, content, {
-            access: BLOB_ACCESS,
-            contentType,
-            handleUploadUrl: `${API_ROOT}/files/upload-token`,
-            multipart: content.size > 5 * 1024 * 1024
+        storageKey = await uploadToNeonStorage(content, {
+            id: file.id,
+            name: file.name,
+            contentType
         });
-        blobUrl = blob.url;
     }
     const result = await request("/migration/files", jsonRequest("POST", {
         id: file.id,
@@ -149,7 +143,7 @@ export async function migrateLegacyFile(file, content) {
         type: file.type ?? "",
         subject: file.subject ?? "",
         url: file.url ?? "",
-        blobUrl,
+        storageKey,
         mimeType: content instanceof Blob
             ? getUploadContentType({ name: file.name, type: content.type }, file.mimeType)
             : getUploadContentType({ name: file.name, type: file.mimeType }, file.mimeType),
@@ -158,6 +152,43 @@ export async function migrateLegacyFile(file, content) {
     }));
     mutateCollection("files", result.file);
     return result;
+}
+
+async function uploadToNeonStorage(file, { id, name, contentType, onUploadProgress }) {
+    const target = await request("/files/upload-url", jsonRequest("POST", {
+        id,
+        name,
+        mimeType: contentType,
+        size: file.size
+    }));
+    await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("PUT", target.url);
+        for (const [header, value] of Object.entries(target.headers ?? {})) {
+            xhr.setRequestHeader(header, value);
+        }
+        xhr.upload.addEventListener("progress", event => {
+            if (!onUploadProgress || !event.lengthComputable) return;
+            onUploadProgress({
+                loaded: event.loaded,
+                total: event.total,
+                percentage: Math.round(event.loaded / event.total * 100)
+            });
+        });
+        xhr.addEventListener("load", () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+                resolve();
+            } else {
+                reject(new Error(`Der Datei-Upload zu Neon Object Storage ist fehlgeschlagen (${xhr.status}).`));
+            }
+        }, { once: true });
+        xhr.addEventListener("error", () => {
+            reject(new Error("Neon Object Storage ist nicht erreichbar. Prüfe die Bucket-CORS-Konfiguration."));
+        }, { once: true });
+        xhr.addEventListener("abort", () => reject(new Error("Der Datei-Upload wurde abgebrochen.")), { once: true });
+        xhr.send(file);
+    });
+    return target.key;
 }
 
 export async function migrateLegacyPresentation(presentation) {
@@ -203,7 +234,7 @@ export async function fetchSharedFile(id, { download = false } = {}) {
         );
     } catch (requestError) {
         throw new Error(
-            `Die Datei konnte nicht aus Vercel Blob geladen werden. (${requestError.message})`
+            `Die Datei konnte nicht aus dem Dateispeicher geladen werden. (${requestError.message})`
         );
     }
     if (!response.ok) {

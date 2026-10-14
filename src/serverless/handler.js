@@ -1,5 +1,4 @@
-import { randomUUID } from "node:crypto";
-import { handleUpload as handleVercelBlobUpload } from "@vercel/blob/client";
+import { createHash, randomUUID } from "node:crypto";
 
 const maxFileSize = 100 * 1024 * 1024;
 const schema = `
@@ -19,10 +18,12 @@ const schema = `
         subject TEXT NOT NULL DEFAULT '',
         external_url TEXT NOT NULL DEFAULT '',
         blob_url TEXT,
+        storage_key TEXT,
         mime_type TEXT NOT NULL DEFAULT 'application/octet-stream',
         size BIGINT NOT NULL DEFAULT 0,
         created_at BIGINT NOT NULL
     );
+    ALTER TABLE files ADD COLUMN IF NOT EXISTS storage_key TEXT;
     CREATE TABLE IF NOT EXISTS project_files (
         project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
         file_id TEXT NOT NULL REFERENCES files(id) ON DELETE CASCADE,
@@ -60,11 +61,11 @@ function normalizeFile(row) {
         name: row.name,
         type: row.type,
         subject: row.subject,
-        url: row.blob_url || row.external_url || "",
+        url: row.blob_url || row.storage_key || row.external_url || "",
         mimeType: row.mime_type,
         size: Number(row.size),
         createdAt: Number(row.created_at),
-        hasContent: Boolean(row.blob_url)
+        hasContent: Boolean(row.storage_key || row.blob_url)
     };
 }
 
@@ -83,7 +84,7 @@ function normalizeProject(row, fileIds = []) {
 
 async function getFile(database, id) {
     const result = await database.query(
-        `SELECT id, name, type, subject, external_url, blob_url, mime_type, size, created_at
+        `SELECT id, name, type, subject, external_url, blob_url, storage_key, mime_type, size, created_at
          FROM files WHERE id = $1`,
         [id]
     );
@@ -115,7 +116,7 @@ async function getState(database) {
             ORDER BY p.created_at DESC
         `),
         database.query(`
-            SELECT id, name, type, subject, external_url, blob_url, mime_type, size, created_at
+            SELECT id, name, type, subject, external_url, blob_url, storage_key, mime_type, size, created_at
             FROM files ORDER BY created_at DESC
         `)
     ]);
@@ -132,6 +133,32 @@ function validBlobUrl(value) {
             url.hostname.endsWith(".blob.vercel-storage.com");
     } catch {
         return false;
+    }
+}
+
+export function storageKeyForFile(id, version = "") {
+    const digest = createHash("sha256").update(id).digest("hex");
+    return `files/${digest}/${version ? `${version}/` : ""}content`;
+}
+
+function isValidStorageKey(key, id) {
+    const baseKey = storageKeyForFile(id).replace(/\/content$/, "");
+    return key === `${baseKey}/content` ||
+        new RegExp(`^${baseKey}/[0-9a-f-]{36}/content$`, "i").test(key);
+}
+
+function isObjectNotFound(error) {
+    return error?.name === "NoSuchKey" ||
+        error?.name === "NotFound" ||
+        error?.$metadata?.httpStatusCode === 404;
+}
+
+async function findStorageObject(headObject, key) {
+    try {
+        return await headObject(key);
+    } catch (error) {
+        if (isObjectNotFound(error)) return null;
+        throw error;
     }
 }
 
@@ -178,7 +205,12 @@ export function createApiHandler({
     database,
     deleteBlob = async () => {},
     getBlob = async () => null,
-    handleBlobUpload = handleVercelBlobUpload
+    createUploadUrl = async () => {
+        throw new Error("Neon Object Storage ist nicht konfiguriert.");
+    },
+    headObject = async () => null,
+    getObject = async () => null,
+    deleteObject = async () => {}
 }) {
     if (!database?.query || !database?.transaction) {
         throw new TypeError("A queryable PostgreSQL database is required.");
@@ -215,30 +247,29 @@ export function createApiHandler({
                 return json({ sync: "polling", intervalMs: 5000 });
             }
 
-            if (method === "POST" && segments[0] === "files" && segments[1] === "upload-token") {
-                const token = process.env.BLOB_READ_WRITE_TOKEN;
-                if (!token) {
-                    return failure("Vercel Blob ist nicht konfiguriert. Setze BLOB_READ_WRITE_TOKEN.", 503);
-                }
+            if (method === "POST" && segments[0] === "files" && segments[1] === "upload-url") {
                 const body = await request.json();
-                const result = await handleBlobUpload({
-                    token,
-                    request,
-                    body,
-                    onBeforeGenerateToken: async pathname => ({
-                        allowedContentTypes: [
-                            "image/*",
-                            "video/*",
-                            "audio/*",
-                            "application/*",
-                            "text/*"
-                        ],
-                        maximumSizeInBytes: maxFileSize,
-                        addRandomSuffix: true,
-                        tokenPayload: JSON.stringify({ pathname: safeFilename(pathname) })
-                    })
+                const id = cleanText(body.id, 100);
+                const name = safeFilename(body.name);
+                const mimeType = cleanText(body.mimeType, 150) || "application/octet-stream";
+                const size = Number(body.size);
+                if (!id || !name || !Number.isFinite(size) || size < 0 || size > maxFileSize) {
+                    return failure("Bitte prüfe Dateiname und Dateigröße (maximal 100 MB).");
+                }
+                const existing = await database.query(
+                    "SELECT storage_key, blob_url FROM files WHERE id = $1",
+                    [id]
+                );
+                if (existing.rows[0]?.storage_key || existing.rows[0]?.blob_url) {
+                    return failure("Für diese Datei-ID ist bereits ein Dateiinhalt gespeichert.", 409);
+                }
+                const key = storageKeyForFile(id, randomUUID());
+                const uploadUrl = await createUploadUrl(key, mimeType);
+                return json({
+                    url: uploadUrl,
+                    key,
+                    headers: { "Content-Type": mimeType }
                 });
-                return json(result);
             }
 
             if (method === "POST" && segments[0] === "projects" && segments.length === 1) {
@@ -308,29 +339,46 @@ export function createApiHandler({
                 const body = await request.json();
                 const name = safeFilename(body.name);
                 const blobUrl = cleanText(body.url, 2048);
-                if (!name || !validBlobUrl(blobUrl)) {
-                    return failure("Die hochgeladene Datei hat keine gültige Vercel-Blob-Adresse.");
-                }
                 const id = cleanText(body.id, 100) || randomUUID();
+                const storageKey = cleanText(body.storageKey, 200);
+                if (!name || (storageKey && !isValidStorageKey(storageKey, id)) ||
+                    (!storageKey && !validBlobUrl(blobUrl))) {
+                    return failure("Die hochgeladene Datei hat keinen gültigen Neon-Speicherschlüssel.");
+                }
                 const mimeType = cleanText(body.mimeType, 150) || "application/octet-stream";
                 const size = Number(body.size);
                 if (!Number.isFinite(size) || size < 0 || size > maxFileSize) {
                     return failure("Dateien dürfen höchstens 100 MB groß sein.");
                 }
-                const existing = await database.query("SELECT blob_url FROM files WHERE id = $1", [id]);
+                if (storageKey) {
+                    const object = await findStorageObject(headObject, storageKey);
+                    if (!object || Number(object.ContentLength) !== Math.trunc(size)) {
+                        return failure("Der Datei-Upload konnte in Neon Object Storage nicht verifiziert werden.", 400);
+                    }
+                }
+                const existing = await database.query(
+                    "SELECT blob_url, storage_key FROM files WHERE id = $1",
+                    [id]
+                );
                 if (existing.rows.length) {
-                    if (existing.rows[0].blob_url === blobUrl) return json(await getFile(database, id));
+                    if (
+                        (storageKey && existing.rows[0].storage_key === storageKey) ||
+                        (blobUrl && existing.rows[0].blob_url === blobUrl)
+                    ) {
+                        return json(await getFile(database, id));
+                    }
                     return failure("Diese Datei-ID wird bereits verwendet.", 409);
                 }
                 await database.query(
-                    `INSERT INTO files (id, name, type, subject, blob_url, mime_type, size, created_at)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+                    `INSERT INTO files (id, name, type, subject, blob_url, storage_key, mime_type, size, created_at)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
                     [
                         id,
                         name,
                         cleanText(body.type, 40) || "Sonstiges",
                         cleanText(body.subject, 100),
-                        blobUrl,
+                        blobUrl || null,
+                        storageKey || null,
                         mimeType,
                         Math.trunc(size),
                         Number(body.createdAt) || Date.now()
@@ -345,11 +393,21 @@ export function createApiHandler({
                 const name = safeFilename(body.name);
                 if (!id || !name) return failure("Die alte Datei enthält keine gültige ID oder keinen Dateinamen.");
                 const blobUrl = cleanText(body.blobUrl, 2048);
+                const storageKey = cleanText(body.storageKey, 200);
                 if (blobUrl && !validBlobUrl(blobUrl)) {
                     return failure("Die alte Datei hat keine gültige Vercel-Blob-Adresse.");
                 }
+                if (storageKey && !isValidStorageKey(storageKey, id)) {
+                    return failure("Die alte Datei hat keinen gültigen Neon-Speicherschlüssel.");
+                }
+                if (storageKey) {
+                    const object = await findStorageObject(headObject, storageKey);
+                    if (!object || Number(object.ContentLength) !== (Number(body.size) || 0)) {
+                        return failure("Der Datei-Upload konnte in Neon Object Storage nicht verifiziert werden.", 400);
+                    }
+                }
                 const externalUrl = cleanText(body.url, 2048);
-                if (!blobUrl && externalUrl) {
+                if (!blobUrl && !storageKey && externalUrl) {
                     try {
                         const parsedExternalUrl = new URL(externalUrl);
                         if (!["http:", "https:"].includes(parsedExternalUrl.protocol)) {
@@ -360,19 +418,20 @@ export function createApiHandler({
                     }
                 }
                 const existing = await database.query(
-                    "SELECT blob_url FROM files WHERE id = $1",
+                    "SELECT blob_url, storage_key FROM files WHERE id = $1",
                     [id]
                 );
                 let migrated = false;
                 let repaired = false;
                 if (existing.rows.length) {
-                    if (!existing.rows[0].blob_url && blobUrl) {
+                    if (!existing.rows[0].blob_url && !existing.rows[0].storage_key && (blobUrl || storageKey)) {
                         await database.query(
                             `UPDATE files
-                             SET blob_url = $1, external_url = '', mime_type = $2, size = $3
-                             WHERE id = $4 AND blob_url IS NULL`,
+                             SET blob_url = $1, storage_key = $2, external_url = '', mime_type = $3, size = $4
+                             WHERE id = $5 AND blob_url IS NULL AND storage_key IS NULL`,
                             [
-                                blobUrl,
+                                blobUrl || null,
+                                storageKey || null,
                                 cleanText(body.mimeType, 150) || "application/octet-stream",
                                 Number(body.size) || 0,
                                 id
@@ -383,15 +442,16 @@ export function createApiHandler({
                 } else {
                     await database.query(
                         `INSERT INTO files
-                         (id, name, type, subject, external_url, blob_url, mime_type, size, created_at)
-                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+                         (id, name, type, subject, external_url, blob_url, storage_key, mime_type, size, created_at)
+                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
                         [
                             id,
                             name,
                             cleanText(body.type, 40) || "Sonstiges",
                             cleanText(body.subject, 100),
-                            blobUrl ? "" : externalUrl,
+                            (blobUrl || storageKey) ? "" : externalUrl,
                             blobUrl || null,
+                            storageKey || null,
                             cleanText(body.mimeType, 150) || "application/octet-stream",
                             Number(body.size) || 0,
                             Number(body.createdAt) || Date.now()
@@ -485,16 +545,19 @@ export function createApiHandler({
             if (segments[0] === "files" && segments.length === 2 && method === "PUT") {
                 const body = await request.json();
                 const existingResult = await database.query(
-                    "SELECT blob_url, external_url FROM files WHERE id = $1",
+                    "SELECT blob_url, storage_key, external_url FROM files WHERE id = $1",
                     [segments[1]]
                 );
                 const existing = existingResult.rows[0];
                 if (!existing) return failure("Die Datei wurde nicht gefunden.", 404);
                 const hasUrl = typeof body.url === "string";
                 const updatedUrl = hasUrl ? cleanText(body.url, 2048) : "";
-                const keepBlob = Boolean(existing.blob_url && (!hasUrl || updatedUrl === existing.blob_url));
+                const keepContent = Boolean(
+                    (existing.blob_url || existing.storage_key) &&
+                    (!hasUrl || updatedUrl === existing.blob_url || updatedUrl === existing.storage_key)
+                );
                 let externalUrl = existing.external_url;
-                if (hasUrl && !keepBlob) {
+                if (hasUrl && !keepContent) {
                     if (updatedUrl && !/^https?:\/\//i.test(updatedUrl)) {
                         return failure("Bitte einen gültigen HTTP(S)-Datei-Link eingeben.");
                     }
@@ -504,14 +567,15 @@ export function createApiHandler({
                     `UPDATE files
                      SET                      name = COALESCE($1, name), type = COALESCE($2, type),
                      subject = COALESCE($3, subject), external_url = $4,
-                         blob_url = $5
-                     WHERE id = $6`,
+                         blob_url = $5, storage_key = $6
+                     WHERE id = $7`,
                     [
                         typeof body.name === "string" ? safeFilename(body.name) : null,
                         typeof body.type === "string" ? cleanText(body.type, 40) : null,
                         typeof body.subject === "string" ? cleanText(body.subject, 100) : null,
-                        keepBlob ? "" : externalUrl,
-                        keepBlob ? existing.blob_url : null,
+                        keepContent ? "" : externalUrl,
+                        keepContent ? existing.blob_url : null,
+                        keepContent ? existing.storage_key : null,
                         segments[1]
                     ]
                 );
@@ -520,23 +584,41 @@ export function createApiHandler({
 
             if (segments[0] === "files" && segments[1] && segments[2] === "content" && method === "GET") {
                 const result = await database.query(
-                    "SELECT blob_url FROM files WHERE id = $1",
+                    "SELECT blob_url, storage_key FROM files WHERE id = $1",
                     [segments[1]]
                 );
                 const blobUrl = result.rows[0]?.blob_url;
-                if (!blobUrl) return failure("Der Dateiinhalt wurde nicht gefunden.", 404);
+                const storageKey = result.rows[0]?.storage_key;
+                if (!blobUrl && !storageKey) return failure("Der Dateiinhalt wurde nicht gefunden.", 404);
                 const file = await getFile(database, segments[1]);
-                const blob = await getBlob(blobUrl);
-                if (!blob || blob.statusCode !== 200) {
-                    return failure("Der Dateiinhalt wurde nicht gefunden.", 404);
-                }
                 const filename = encodeURIComponent(file.name).replace(
                     /[!'()*]/g,
                     character => `%${character.charCodeAt(0).toString(16).toUpperCase()}`
                 );
-                return new Response(blob.stream, {
+                let body;
+                let contentType = file.mimeType;
+                if (storageKey) {
+                    let object;
+                    try {
+                        object = await getObject(storageKey);
+                    } catch (error) {
+                        if (isObjectNotFound(error)) return failure("Der Dateiinhalt wurde nicht gefunden.", 404);
+                        throw error;
+                    }
+                    body = object?.Body?.transformToWebStream?.() ?? object?.Body;
+                    contentType = object?.ContentType || contentType;
+                } else {
+                    const blob = await getBlob(blobUrl);
+                    if (!blob || blob.statusCode !== 200) {
+                        return failure("Der Dateiinhalt wurde nicht gefunden.", 404);
+                    }
+                    body = blob.stream;
+                    contentType = blob.blob.contentType || contentType;
+                }
+                if (!body) return failure("Der Dateiinhalt wurde nicht gefunden.", 404);
+                return new Response(body, {
                     headers: {
-                        "Content-Type": blob.blob.contentType,
+                        "Content-Type": contentType,
                         "Content-Disposition": `${url.searchParams.has("download") ? "attachment" : "inline"}; filename*=UTF-8''${filename}`,
                         "Cache-Control": "private, no-store",
                         "X-Content-Type-Options": "nosniff"
@@ -547,13 +629,29 @@ export function createApiHandler({
             if (segments[0] === "files" && segments.length === 2 && method === "DELETE") {
                 const file = await getFile(database, segments[1]);
                 if (!file) return failure("Die Datei wurde nicht gefunden.", 404);
-                if (file.hasContent) {
+                const storageResult = await database.query(
+                    "SELECT storage_key, blob_url FROM files WHERE id = $1",
+                    [segments[1]]
+                );
+                const storageRecord = storageResult.rows[0];
+                if (storageRecord?.blob_url) {
                     try {
-                        await deleteBlob(file.url);
+                        await deleteBlob(storageRecord.blob_url);
                     } catch (deleteError) {
                         console.error("[Schulorganizer] Vercel Blob delete failed:", deleteError);
                         return failure(
                             "Die Datei konnte nicht aus Vercel Blob gelöscht werden. Der Dateieintrag bleibt erhalten; prüfe die serverseitige Blob-Konfiguration und versuche es erneut.",
+                            502
+                        );
+                    }
+                }
+                if (storageRecord?.storage_key) {
+                    try {
+                        await deleteObject(storageRecord.storage_key);
+                    } catch (deleteError) {
+                        console.error("[Schulorganizer] Neon Object Storage delete failed:", deleteError);
+                        return failure(
+                            "Die Datei konnte nicht aus Neon Object Storage gelöscht werden. Der Dateieintrag bleibt erhalten; versuche es erneut.",
                             502
                         );
                     }
@@ -568,6 +666,9 @@ export function createApiHandler({
             if (error instanceof SyntaxError) return failure("Die Anfrage enthält kein gültiges JSON.");
             if (error.message?.includes("BLOB_READ_WRITE_TOKEN")) {
                 return failure("Vercel Blob ist nicht konfiguriert. Setze BLOB_READ_WRITE_TOKEN.", 503);
+            }
+            if (error.message?.includes("Neon Object Storage")) {
+                return failure("Neon Object Storage ist nicht konfiguriert. Prüfe die serverseitigen AWS_* Umgebungsvariablen.", 503);
             }
             return failure("Die Serveranfrage konnte nicht verarbeitet werden.", 500);
         }

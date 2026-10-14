@@ -7,6 +7,9 @@
     "dev": "npx --yes vercel@63.1.0 dev",
     "build": "vite build",
     "migrate:sqlite": "node scripts/migrate-sqlite.js",
+    "migrate:vercel-files": "node --env-file-if-exists=.env.local scripts/migrate-vercel-files.js",
+    "test:storage": "node --env-file-if-exists=.env.local scripts/smoke-neon-storage.js",
+    "storage:cors": "node --env-file-if-exists=.env.local scripts/configure-storage-cors.js",
     "test": "node --test"
   },
   "devDependencies": {
@@ -15,6 +18,8 @@
   },
   "dependencies": {
     "@aiden0z/pptx-renderer": "^1.3.0",
+    "@aws-sdk/client-s3": "^3.1151.0",
+    "@aws-sdk/s3-request-presigner": "^3.1151.0",
     "@neon/config": "^1.9.1",
     "@neon/env": "^1.6.2",
     "@neondatabase/serverless": "^1.2.0",

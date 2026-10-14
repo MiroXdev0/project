@@ -1,12 +1,11 @@
 import { DatabaseSync } from "node:sqlite";
-import { randomUUID } from "node:crypto";
 import { Pool } from "@neondatabase/serverless";
-import { put } from "@vercel/blob";
-import { BLOB_ACCESS } from "../src/data/blobAccess.js";
-import { postgresSchema } from "../src/serverless/handler.js";
+import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { postgresSchema, storageKeyForFile } from "../src/serverless/handler.js";
 
 const [sqlitePath] = process.argv.slice(2);
 const connectionString = process.env.POSTGRES_URL ?? process.env.DATABASE_URL;
+const storageBucket = "schulorganizer-files";
 
 if (!sqlitePath) {
     throw new Error("Aufruf: npm run migrate:sqlite -- <Pfad-zur-schulorganizer.sqlite>");
@@ -14,12 +13,9 @@ if (!sqlitePath) {
 if (!connectionString) {
     throw new Error("POSTGRES_URL oder DATABASE_URL muss gesetzt sein.");
 }
-if (!process.env.BLOB_READ_WRITE_TOKEN) {
-    throw new Error("BLOB_READ_WRITE_TOKEN muss gesetzt sein.");
-}
-
 const source = new DatabaseSync(sqlitePath, { readOnly: true });
 const pool = new Pool({ connectionString, max: 1 });
+const storage = new S3Client({ forcePathStyle: true });
 const now = Date.now();
 let migratedFiles = 0;
 let migratedProjects = 0;
@@ -35,32 +31,36 @@ try {
     `).all();
 
     for (const file of files) {
-        const current = await pool.query("SELECT blob_url FROM files WHERE id = $1", [file.id]);
+        const current = await pool.query(
+            "SELECT storage_key, blob_url FROM files WHERE id = $1",
+            [file.id]
+        );
+        let storageKey = current.rows[0]?.storage_key ?? null;
         let blobUrl = current.rows[0]?.blob_url ?? null;
         const content = file.content == null ? null : Buffer.from(file.content);
 
-        if (!blobUrl && content !== null) {
-            const safeName = String(file.name).replaceAll("\\", "/").split("/").pop();
-            const blob = await put(`${randomUUID()}-${safeName}`, content, {
-                access: BLOB_ACCESS,
-                token: process.env.BLOB_READ_WRITE_TOKEN,
-                contentType: file.mime_type || "application/octet-stream",
-                addRandomSuffix: true
-            });
-            blobUrl = blob.url;
+        if (!storageKey && !blobUrl && content !== null) {
+            storageKey = storageKeyForFile(file.id);
+            await storage.send(new PutObjectCommand({
+                Bucket: storageBucket,
+                Key: storageKey,
+                Body: content,
+                ContentType: file.mime_type || "application/octet-stream"
+            }));
         }
 
         await pool.query(`
             INSERT INTO files
-                (id, name, type, subject, external_url, blob_url, mime_type, size, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                (id, name, type, subject, external_url, blob_url, storage_key, mime_type, size, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             ON CONFLICT (id) DO UPDATE SET
                 name = EXCLUDED.name,
                 type = EXCLUDED.type,
                 subject = EXCLUDED.subject,
-                external_url = CASE WHEN EXCLUDED.blob_url IS NOT NULL
+                external_url = CASE WHEN EXCLUDED.blob_url IS NOT NULL OR EXCLUDED.storage_key IS NOT NULL
                     THEN '' ELSE EXCLUDED.external_url END,
                 blob_url = COALESCE(files.blob_url, EXCLUDED.blob_url),
+                storage_key = COALESCE(files.storage_key, EXCLUDED.storage_key),
                 mime_type = EXCLUDED.mime_type,
                 size = EXCLUDED.size
         `, [
@@ -68,8 +68,9 @@ try {
             file.name,
             file.type,
             file.subject,
-            blobUrl ? "" : file.url,
+            (blobUrl || storageKey) ? "" : file.url,
             blobUrl,
+            storageKey,
             file.mime_type || "application/octet-stream",
             Number(file.size) || content?.length || 0,
             Number(file.created_at) || now

@@ -1,15 +1,11 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { PGlite } from "@electric-sql/pglite";
-import uploadTokenFunction, { config as uploadTokenConfig } from "../api/files/upload-token.js";
 import catchAllFunction, { config as catchAllConfig } from "../api/[...path].js";
-import { BLOB_ACCESS } from "../src/data/blobAccess.js";
 import { deleteSharedFile, getUploadContentType } from "../src/data/sharedApi.js";
 import { createApiHandler } from "../src/serverless/handler.js";
 
-test("Vercel upload-token route is explicit and keeps request bodies unparsed", () => {
-    assert.equal(typeof uploadTokenFunction, "function");
-    assert.equal(uploadTokenConfig.api.bodyParser, false);
+test("Vercel catch-all API route keeps request bodies unparsed", () => {
     assert.equal(typeof catchAllFunction, "function");
     assert.equal(catchAllConfig.api.bodyParser, false);
 });
@@ -43,16 +39,16 @@ test("PNG uploads retain an image MIME type when the browser omits it", () => {
     assert.equal(getUploadContentType({ name: "archive.exe", type: "" }), "application/octet-stream");
 });
 
-test("browser and legacy uploads target the configured private Blob store", () => {
-    assert.equal(BLOB_ACCESS, "private");
-});
-
 let pg;
 let handler;
 const deletedBlobs = [];
 const readBlobs = [];
-let uploadOptions;
+const deletedObjects = [];
+const readObjects = [];
+const storedObjects = new Map();
+let signedUpload;
 let blobDeletionFailure;
+let storageDeletionFailure;
 
 before(async () => {
     pg = new PGlite();
@@ -91,9 +87,29 @@ before(async () => {
                 blob: { contentType: "application/pdf" }
             };
         },
-        handleBlobUpload: async options => {
-            uploadOptions = options;
-            return { clientToken: "test-client-token" };
+        createUploadUrl: async (key, contentType) => {
+            signedUpload = { key, contentType };
+            return `https://storage.test/${key}`;
+        },
+        headObject: async key => storedObjects.get(key) ?? null,
+        getObject: async key => {
+            readObjects.push(key);
+            return {
+                Body: {
+                    transformToWebStream: () => new ReadableStream({
+                        start(controller) {
+                            controller.enqueue(new TextEncoder().encode("private file bytes"));
+                            controller.close();
+                        }
+                    })
+                },
+                ContentType: "application/pdf"
+            };
+        },
+        deleteObject: async key => {
+            if (storageDeletionFailure) throw storageDeletionFailure;
+            deletedObjects.push(key);
+            storedObjects.delete(key);
         }
     });
 });
@@ -130,42 +146,40 @@ test("health and state use the shared PostgreSQL schema", async () => {
     assert.equal(state.headers.get("cache-control"), "no-store");
 });
 
-test("Blob upload tokens constrain file types and size", async () => {
-    const previousToken = process.env.BLOB_READ_WRITE_TOKEN;
-    process.env.BLOB_READ_WRITE_TOKEN = "test-token";
-    try {
-        const response = await api("/files/upload-token", {
-            method: "POST",
-            body: { type: "blob.generate-client-token", payload: "{}" }
-        });
-        assert.equal(response.status, 200);
-        assert.deepEqual(await json(response), { clientToken: "test-client-token" });
-        assert.equal(uploadOptions.token, "test-token");
-        assert.equal(uploadOptions.request.url, "https://school.test/api/files/upload-token");
-        const constraints = await uploadOptions.onBeforeGenerateToken("upload.pptx");
-        assert.equal(constraints.maximumSizeInBytes, 100 * 1024 * 1024);
-        assert.ok(constraints.allowedContentTypes.includes("image/*"));
-        assert.ok(constraints.allowedContentTypes.includes("text/*"));
-        assert.ok(constraints.allowedContentTypes.includes("application/*"));
+test("Neon presigned uploads validate size and confirm object existence before storing metadata", async () => {
+    const urlResponse = await api("/files/upload-url", {
+        method: "POST",
+        body: {
+            id: "math-file",
+            name: "Mathe.pdf",
+            mimeType: "application/pdf",
+            size: 1024
+        }
+    });
+    assert.equal(urlResponse.status, 200);
+    const uploadTarget = await json(urlResponse);
+    assert.deepEqual(signedUpload, {
+        key: uploadTarget.key,
+        contentType: "application/pdf"
+    });
+    assert.equal(uploadTarget.url, `https://storage.test/${uploadTarget.key}`);
+    assert.deepEqual(uploadTarget.headers, { "Content-Type": "application/pdf" });
 
-        const strippedPrefixResponse = await handler(new Request(
-            "https://school.test/files/upload-token",
-            {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ type: "blob.generate-client-token", payload: "{}" })
-            }
-        ));
-        assert.equal(strippedPrefixResponse.status, 200);
-        assert.deepEqual(await json(strippedPrefixResponse), { clientToken: "test-client-token" });
-    } finally {
-        if (previousToken === undefined) delete process.env.BLOB_READ_WRITE_TOKEN;
-        else process.env.BLOB_READ_WRITE_TOKEN = previousToken;
-    }
+    const tooLarge = await api("/files/upload-url", {
+        method: "POST",
+        body: { id: "too-large", name: "bad.bin", size: 101 * 1024 * 1024 }
+    });
+    assert.equal(tooLarge.status, 400);
+    const missingObject = await api("/files", {
+        method: "POST",
+        body: { id: "math-file", name: "Mathe.pdf", storageKey: uploadTarget.key, size: 1024 }
+    });
+    assert.equal(missingObject.status, 400);
+    storedObjects.set(uploadTarget.key, { ContentLength: 1024 });
 });
 
 test("uploaded file metadata, project attachments, edits, and deletion persist", async () => {
-    const blobUrl = "https://school.private.blob.vercel-storage.com/math.pdf";
+    const storageKey = signedUpload.key;
     const fileResponse = await api("/files", {
         method: "POST",
         body: {
@@ -175,7 +189,7 @@ test("uploaded file metadata, project attachments, edits, and deletion persist",
             subject: "Mathematik",
             mimeType: "application/pdf",
             size: 1024,
-            url: blobUrl,
+            storageKey,
             createdAt: 100
         }
     });
@@ -185,23 +199,12 @@ test("uploaded file metadata, project attachments, edits, and deletion persist",
         name: "Mathe.pdf",
         type: "PDF",
         subject: "Mathematik",
-        url: blobUrl,
+        url: storageKey,
         mimeType: "application/pdf",
         size: 1024,
         createdAt: 100,
         hasContent: true
     });
-
-    const invalidFile = await api("/files", {
-        method: "POST",
-        body: {
-            id: "invalid",
-            name: "bad.pdf",
-            size: 1,
-            url: "https://example.com/file.pdf"
-        }
-    });
-    assert.equal(invalidFile.status, 400);
 
     const projectResponse = await api("/projects", {
         method: "POST",
@@ -216,12 +219,24 @@ test("uploaded file metadata, project attachments, edits, and deletion persist",
     const project = await json(projectResponse);
     assert.deepEqual(project.fileIds, ["math-file"]);
 
+    const projectUpdate = await api(`/projects/${project.id}`, {
+        method: "PUT",
+        body: {
+            title: project.title,
+            subject: project.subject,
+            description: "Aktualisierte Präsentation",
+            fileIds: ["math-file"]
+        }
+    });
+    assert.equal(projectUpdate.status, 200);
+    assert.equal((await json(projectUpdate)).description, "Aktualisierte Präsentation");
+
     const contentResponse = await api("/files/math-file/content");
     assert.equal(contentResponse.status, 200);
     assert.equal(contentResponse.headers.get("content-type"), "application/pdf");
     assert.equal(contentResponse.headers.get("content-disposition"), "inline; filename*=UTF-8''Mathe.pdf");
     assert.equal(await contentResponse.text(), "private file bytes");
-    assert.equal(readBlobs[0], blobUrl);
+    assert.equal(readObjects[0], storageKey);
 
     const downloadResponse = await api("/files/math-file/content?download=1");
     assert.equal(downloadResponse.headers.get("content-disposition"), "attachment; filename*=UTF-8''Mathe.pdf");
@@ -233,26 +248,30 @@ test("uploaded file metadata, project attachments, edits, and deletion persist",
     assert.equal(update.status, 200);
     const updatedFile = await json(update);
     assert.equal(updatedFile.subject, "Physik");
-    assert.equal(updatedFile.url, blobUrl);
+    assert.equal(updatedFile.url, storageKey);
     assert.equal(updatedFile.hasContent, true);
 
     const state = await json(await api("/state"));
     assert.equal(state.presentations[0].title, "Bruchrechnung");
     assert.equal(state.files[0].subject, "Physik");
 
-    blobDeletionFailure = new Error("Blob storage unavailable");
-    const failedDeletion = await api("/files/math-file", { method: "DELETE" });
-    blobDeletionFailure = null;
-    assert.equal(failedDeletion.status, 502);
-    assert.match((await json(failedDeletion)).error, /Dateieintrag bleibt erhalten/);
-    assert.deepEqual(deletedBlobs, []);
-    const stateAfterFailedDeletion = await json(await api("/state"));
-    assert.equal(stateAfterFailedDeletion.files[0].id, "math-file");
-    assert.deepEqual(stateAfterFailedDeletion.presentations[0].fileIds, ["math-file"]);
+    const duplicateUploadUrl = await api("/files/upload-url", {
+        method: "POST",
+        body: { id: "math-file", name: "overwrite.pdf", mimeType: "application/pdf", size: 1 }
+    });
+    assert.equal(duplicateUploadUrl.status, 409);
+
+    storageDeletionFailure = new Error("Neon Object Storage unavailable");
+    const failedDelete = await api("/files/math-file", { method: "DELETE" });
+    storageDeletionFailure = null;
+    assert.equal(failedDelete.status, 502);
+    assert.match((await json(failedDelete)).error, /Neon Object Storage/);
+    assert.equal((await json(await api("/state"))).files[0].id, "math-file");
+    assert.deepEqual(deletedObjects, []);
 
     const deletion = await api("/files/math-file", { method: "DELETE" });
     assert.equal(deletion.status, 204);
-    assert.deepEqual(deletedBlobs, [blobUrl]);
+    assert.deepEqual(deletedObjects, [storageKey]);
     const stateAfterDeletion = await json(await api("/state"));
     assert.deepEqual(stateAfterDeletion.files, []);
     assert.deepEqual(stateAfterDeletion.presentations[0].fileIds, []);
@@ -341,4 +360,19 @@ test("legacy file and presentation migration is repeatable and repairs attachmen
     assert.equal((await json(repairedProject)).repaired, true);
     assert.deepEqual((await json(await api("/state"))).presentations
         .find(item => item.id === project.id).fileIds, ["legacy-file", "later-file"]);
+
+    const legacyContent = await api("/files/legacy-file/content");
+    assert.equal(legacyContent.status, 200);
+    assert.equal(await legacyContent.text(), "private file bytes");
+    assert.equal(readBlobs.at(-1), blobUrl);
+
+    blobDeletionFailure = new Error("Legacy Blob is unavailable");
+    const failedDelete = await api("/files/legacy-file", { method: "DELETE" });
+    blobDeletionFailure = null;
+    assert.equal(failedDelete.status, 502);
+    assert.equal((await json(await api("/state"))).files.some(file => file.id === "legacy-file"), true);
+
+    const deleteLegacy = await api("/files/legacy-file", { method: "DELETE" });
+    assert.equal(deleteLegacy.status, 204);
+    assert.deepEqual(deletedBlobs, [blobUrl]);
 });

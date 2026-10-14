@@ -1,13 +1,21 @@
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import {
+    DeleteObjectCommand,
+    GetObjectCommand,
+    HeadObjectCommand,
+    PutObjectCommand
+} from "@aws-sdk/client-s3";
 import { Pool } from "@neondatabase/serverless";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { del, get } from "@vercel/blob";
-import { handleUpload } from "@vercel/blob/client";
 import { BLOB_ACCESS } from "../data/blobAccess.js";
 import { createApiHandler } from "./handler.js";
+import { createNeonStorageClient, storageBucket } from "./neonStorage.js";
 
 let pool;
 let handler;
+let storageClient;
 
 function getPool() {
     if (pool) return pool;
@@ -22,6 +30,12 @@ function getPool() {
         connectionTimeoutMillis: 10_000
     });
     return pool;
+}
+
+function getStorageClient() {
+    if (storageClient) return storageClient;
+    storageClient = createNeonStorageClient();
+    return storageClient;
 }
 
 function getHandler() {
@@ -50,7 +64,27 @@ function getHandler() {
         database,
         deleteBlob: url => del(url),
         getBlob: url => get(url, { access: BLOB_ACCESS }),
-        handleBlobUpload: options => handleUpload(options)
+        createUploadUrl: (key, contentType) => getSignedUrl(
+            getStorageClient(),
+            new PutObjectCommand({
+                Bucket: storageBucket,
+                Key: key,
+                ContentType: contentType
+            }),
+            { expiresIn: 900 }
+        ),
+        headObject: key => getStorageClient().send(new HeadObjectCommand({
+            Bucket: storageBucket,
+            Key: key
+        })),
+        getObject: key => getStorageClient().send(new GetObjectCommand({
+            Bucket: storageBucket,
+            Key: key
+        })),
+        deleteObject: key => getStorageClient().send(new DeleteObjectCommand({
+            Bucket: storageBucket,
+            Key: key
+        }))
     });
     return handler;
 }
