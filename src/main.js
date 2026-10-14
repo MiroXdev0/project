@@ -1,4 +1,5 @@
 import "./style.css";
+import deletedFilesNoticeFlag from "../messedeon.txt?raw";
 
 import {
     getTasks,
@@ -2689,6 +2690,10 @@ function renderAll() {
 */
 
 async function initializeApplication() {
+    if (deletedFilesNoticeFlag.trim() === "1") {
+        error("Alle Dateien wurden aufgrund eines Fehlers gelöscht. Bitte laden Sie die Dateien erneut hoch.");
+    }
+
     try {
         await refreshSharedData();
         try {

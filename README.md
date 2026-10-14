@@ -15,15 +15,16 @@ Dateimetadaten in PostgreSQL und Vercel Blob speichert die Originaldateien.
    Build-Befehl `npm run build` und Ausgabeordner `dist` verwenden. Zusätzliche
    Rewrites sind nicht nötig: Vercel stellt `api/[...path].js` als API-Funktion
    und `dist` als Frontend unter derselben Domain bereit.
-2. Im Vercel-Projekt unter **Storage** eine Neon-PostgreSQL-Datenbank und einen
-   Vercel-Blob-Speicher verbinden. Beide Integrationen für Production, Preview
-   und Development aktivieren.
+2. Im Vercel-Projekt einen Vercel-Blob-Speicher verbinden. Die Neon-Datenbank
+   entweder als Neon-Integration verbinden oder ihre gepoolte
+   `DATABASE_URL` aus Neon für Production, Preview und Development als
+   Umgebungsvariable hinterlegen.
 3. Prüfen, dass folgende Umgebungsvariablen für die Vercel-Umgebungen gesetzt
    sind:
 
    | Variable | Zweck |
    | --- | --- |
-   | `POSTGRES_URL` | Verbindungszeichenfolge für Neon PostgreSQL. Alternativ wird `DATABASE_URL` akzeptiert. |
+   | `POSTGRES_URL` oder `DATABASE_URL` | Verbindungszeichenfolge für Neon PostgreSQL. `DATABASE_URL` ist die gepoolte URL, die `neon env pull` bereitstellt. |
    | `BLOB_READ_WRITE_TOKEN` | Schreib-/Lesetoken des Vercel-Blob-Speichers. |
 
    Vercel-Storage-Integrationen legen diese Variablen normalerweise automatisch
@@ -42,16 +43,21 @@ angelegt.
 
 ```sh
 npm ci
+neon login
+neon env pull .env.local
 npx vercel login
 npx vercel link
-npx vercel env pull .env.local
 npm run dev
 ```
 
 `vercel dev` führt lokal sowohl die Vite-Seite als auch die API-Funktion aus.
-Alternativ können die Werte aus [`.env.example`](./.env.example) in `.env.local`
-eingetragen werden. Neon und Blob müssen dafür erreichbar und konfiguriert sein.
-Eine reine Vite-Vorschau (`vite preview`) stellt die API nicht bereit.
+`neon env pull` schreibt die Neon-Verbindungsdaten in `.env.local`. Ergänze dort
+`BLOB_READ_WRITE_TOKEN` aus dem Vercel-Projekt. Alternativ kann
+`vercel env pull .env.local` verwendet werden, wenn die Vercel-Umgebung sowohl
+die Neon-URL als auch den Blob-Token enthält. Die Vorlage liegt in
+[`.env.example`](./.env.example). Neon und Blob müssen erreichbar und
+konfiguriert sein. Eine reine Vite-Vorschau (`vite preview`) stellt die API
+nicht bereit.
 
 ## Daten und Migration
 
@@ -70,8 +76,8 @@ Eine reine Vite-Vorschau (`vite preview`) stellt die API nicht bereit.
   muss die aktualisierte App einmal öffnen, damit seine Inhalte übertragen
   werden können.
 - Eine vorhandene SQLite-Serverdatenbank kann einmalig mit Node.js 24 migriert
-  werden. Zuerst `.env.local` mit `POSTGRES_URL` und `BLOB_READ_WRITE_TOKEN`
-  befüllen, dann ausführen:
+  werden. Zuerst `.env.local` mit `POSTGRES_URL` oder `DATABASE_URL` sowie
+  `BLOB_READ_WRITE_TOKEN` befüllen, dann ausführen:
 
   ```sh
   npm run migrate:sqlite -- "C:\Pfad\zu\schulorganizer.sqlite"
