@@ -114,6 +114,48 @@ function createElement(tag, className = "", text = "") {
     return element;
 }
 
+function showDeletedFilesNotice() {
+    const previousFocus = document.activeElement;
+    const app = document.querySelector(".app");
+    const appWasInert = app?.inert ?? false;
+    const backdrop = createElement("div", "startup-alert-backdrop");
+    const dialog = createElement("section", "startup-alert");
+    const title = createElement("h2", "startup-alert-title", "Wichtiger Hinweis");
+    const message = createElement(
+        "p",
+        "startup-alert-message",
+        "Alle Dateien wurden aufgrund eines Fehlers gelöscht. Bitte laden Sie die Dateien erneut hoch."
+    );
+    const confirmButton = createElement("button", "primary-button startup-alert-confirm", "OK");
+
+    dialog.setAttribute("role", "alertdialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-labelledby", "startup-alert-title");
+    dialog.setAttribute("aria-describedby", "startup-alert-message");
+    title.id = "startup-alert-title";
+    message.id = "startup-alert-message";
+    confirmButton.type = "button";
+    dialog.append(title, message, confirmButton);
+    backdrop.appendChild(dialog);
+    document.body.appendChild(backdrop);
+    document.body.classList.add("startup-alert-open");
+    if (app) {
+        app.inert = true;
+    }
+    confirmButton.focus();
+
+    confirmButton.addEventListener("click", () => {
+        backdrop.remove();
+        document.body.classList.remove("startup-alert-open");
+        if (app) {
+            app.inert = appWasInert;
+        }
+        if (previousFocus instanceof HTMLElement && previousFocus.isConnected) {
+            previousFocus.focus();
+        }
+    }, { once: true });
+}
+
 
 function formatDate(date) {
     if (!date) {
@@ -2691,7 +2733,7 @@ function renderAll() {
 
 async function initializeApplication() {
     if (deletedFilesNoticeFlag.trim() === "1") {
-        error("Alle Dateien wurden aufgrund eines Fehlers gelöscht. Bitte laden Sie die Dateien erneut hoch.");
+        showDeletedFilesNotice();
     }
 
     try {
