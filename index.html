@@ -50,7 +50,7 @@
                 data-page="dashboard"
                 aria-label="Übersicht"
             >
-                <span class="nav-icon">⌂</span>
+                <span class="nav-icon" data-icon="overview"></span>
                 <span data-mobile-label="Übersicht">Übersicht</span>
             </button>
 
@@ -60,7 +60,7 @@
                 data-page="tasks"
                 aria-label="Aufgaben"
             >
-                <span class="nav-icon">✓</span>
+                <span class="nav-icon" data-icon="task"></span>
                 <span data-mobile-label="Aufgaben">Aufgaben</span>
             </button>
 
@@ -70,8 +70,8 @@
                 data-page="presentations"
                 aria-label="Präsentationen"
             >
-                <span class="nav-icon">▣</span>
-                <span data-mobile-label="Präsent.">Präsentationen</span>
+                <span class="nav-icon" data-icon="presentation"></span>
+                <span data-mobile-label="Präs.">Präsentationen</span>
             </button>
 
             <button
@@ -80,7 +80,7 @@
                 data-page="notes"
                 aria-label="Notizen"
             >
-                <span class="nav-icon">▤</span>
+                <span class="nav-icon" data-icon="note"></span>
                 <span data-mobile-label="Notizen">Notizen</span>
             </button>
 
@@ -90,7 +90,7 @@
                 data-page="files"
                 aria-label="Dateien"
             >
-                <span class="nav-icon">▱</span>
+                <span class="nav-icon" data-icon="file"></span>
                 <span data-mobile-label="Dateien">Dateien</span>
             </button>
 
@@ -100,7 +100,7 @@
                 data-page="subjects"
                 aria-label="Fächer"
             >
-                <span class="nav-icon">◈</span>
+                <span class="nav-icon" data-icon="subjects"></span>
                 <span data-mobile-label="Fächer">Fächer</span>
             </button>
 
@@ -140,7 +140,7 @@
                     aria-expanded="false"
                     aria-controls="addMenu"
                 >
-                    <span>+</span>
+                    <span class="button-icon" data-icon="plus"></span>
                     <span>Hinzufügen</span>
                 </button>
 
@@ -173,9 +173,7 @@
                             Aufgaben
                         </span>
 
-                        <span class="card-icon">
-                            ✓
-                        </span>
+                        <span class="card-icon" data-icon="task"></span>
                     </div>
 
                     <strong id="taskCount">
@@ -196,9 +194,7 @@
                             Präsentationen
                         </span>
 
-                        <span class="card-icon">
-                            ▣
-                        </span>
+                        <span class="card-icon" data-icon="presentation"></span>
                     </div>
 
                     <strong id="presentationCount">
@@ -219,9 +215,7 @@
                             Notizen
                         </span>
 
-                        <span class="card-icon">
-                            ▤
-                        </span>
+                        <span class="card-icon" data-icon="note"></span>
                     </div>
 
                     <strong id="noteCount">
@@ -242,9 +236,7 @@
                             Dateien
                         </span>
 
-                        <span class="card-icon">
-                            ▱
-                        </span>
+                        <span class="card-icon" data-icon="file"></span>
                     </div>
 
                     <strong id="fileCount">
@@ -260,7 +252,7 @@
                 <button class="dashboard-card dashboard-link" type="button" data-dashboard-page="subjects" aria-label="Zu den Fächern">
                     <div class="card-top">
                         <span class="card-label">Fächer</span>
-                        <span class="card-icon" aria-hidden="true">◈</span>
+                        <span class="card-icon" data-icon="subjects"></span>
                     </div>
                     <strong id="subjectCount">0</strong>
                     <span class="card-description">organisiert</span>

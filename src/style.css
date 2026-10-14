@@ -2845,6 +2845,92 @@ body {
     }
 }
 
+.ui-icon {
+    display: block;
+    width: 19px;
+    height: 19px;
+    flex: 0 0 auto;
+}
+
+.nav-icon {
+    width: 22px;
+    height: 22px;
+    display: grid;
+    place-items: center;
+}
+
+.nav-icon .ui-icon {
+    width: 20px;
+    height: 20px;
+    stroke-width: 1.9;
+}
+
+.nav-item.active .nav-icon .ui-icon {
+    stroke-width: 2.15;
+}
+
+.card-icon {
+    display: grid;
+    place-items: center;
+}
+
+.card-icon .ui-icon {
+    width: 20px;
+    height: 20px;
+}
+
+.button-icon {
+    display: inline-grid;
+    place-items: center;
+}
+
+.button-icon .ui-icon {
+    width: 18px;
+    height: 18px;
+}
+
+.item-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+}
+
+.item-action .ui-icon {
+    width: 15px;
+    height: 15px;
+}
+
+.add-menu button {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.add-menu .ui-icon {
+    width: 17px;
+    height: 17px;
+    color: var(--text-secondary);
+}
+
+.add-menu button:hover .ui-icon,
+.add-menu button:focus-visible .ui-icon {
+    color: var(--primary);
+}
+
+@media (max-width: 768px) {
+    .card-label {
+        font-size: 12px;
+        white-space: nowrap;
+    }
+
+    .card-icon {
+        width: 32px;
+        height: 32px;
+        flex: 0 0 auto;
+    }
+}
+
 body.startup-alert-open {
     overflow: hidden;
 }
@@ -2888,4 +2974,363 @@ body.startup-alert-open {
     min-width: 140px;
     min-height: 52px;
     font-size: 18px;
+}
+
+/* ============================================================
+   VISUAL POLISH
+   ============================================================ */
+
+:root {
+    --background: #f3f6fc;
+    --surface-soft: #f7f9fd;
+    --text: #17243b;
+    --text-secondary: #68778f;
+    --text-light: #93a0b3;
+    --border: #e5eaf2;
+    --border-strong: #d5deeb;
+    --primary: #315fe8;
+    --primary-hover: #244dcc;
+    --primary-soft: #edf2ff;
+    --radius-small: 10px;
+    --radius-medium: 15px;
+    --radius-large: 20px;
+    --shadow-small: 0 2px 8px rgba(32, 52, 89, 0.045);
+    --shadow-medium: 0 14px 36px rgba(32, 52, 89, 0.12);
+}
+
+body {
+    background:
+        radial-gradient(ellipse at 88% 0%, rgba(208, 222, 255, 0.38), transparent 34rem),
+        var(--background);
+}
+
+.sidebar {
+    background: rgba(255, 255, 255, 0.94);
+    border-right-color: #e7ebf3;
+    box-shadow: 8px 0 30px rgba(35, 54, 86, 0.025);
+}
+
+.brand {
+    margin-bottom: 44px;
+}
+
+.brand-logo {
+    filter: drop-shadow(0 4px 8px rgba(35, 78, 170, 0.12));
+}
+
+.navigation {
+    gap: 6px;
+}
+
+.nav-item {
+    min-height: 46px;
+    border: 1px solid transparent;
+    transition:
+        background 0.18s ease,
+        color 0.18s ease,
+        border-color 0.18s ease,
+        transform 0.18s ease;
+}
+
+.nav-item:hover {
+    transform: translateX(2px);
+}
+
+.nav-item.active {
+    border-color: #e1e9ff;
+    background: linear-gradient(100deg, #edf2ff, #f5f7ff);
+    color: #244fc8;
+    font-weight: 650;
+}
+
+.nav-item.active .nav-icon {
+    color: var(--primary);
+}
+
+.sidebar-footer {
+    font-size: 12px;
+}
+
+.content {
+    padding: 42px clamp(28px, 4vw, 64px);
+}
+
+.topbar {
+    padding-bottom: 25px;
+    border-bottom: 1px solid rgba(215, 224, 238, 0.75);
+    margin-bottom: 30px;
+}
+
+.topbar-info h2 {
+    color: #17243b;
+    font-size: clamp(27px, 2.3vw, 34px);
+    letter-spacing: -1px;
+}
+
+.topbar-info p {
+    margin-top: 9px;
+    font-size: 15px;
+}
+
+.primary-button,
+.secondary-button {
+    min-height: 44px;
+    border-radius: 11px;
+    font-size: 14px;
+    transition:
+        background 0.18s ease,
+        color 0.18s ease,
+        border-color 0.18s ease,
+        box-shadow 0.18s ease,
+        transform 0.18s ease;
+}
+
+.primary-button {
+    box-shadow: 0 5px 12px rgba(49, 95, 232, 0.18);
+}
+
+.primary-button:hover {
+    box-shadow: 0 8px 18px rgba(49, 95, 232, 0.24);
+    transform: translateY(-1px);
+}
+
+.secondary-button {
+    background: #fff;
+}
+
+.dashboard-grid {
+    gap: 18px;
+    margin-bottom: 28px;
+}
+
+.dashboard-card {
+    position: relative;
+    min-height: 158px;
+    overflow: hidden;
+    padding: 21px 22px;
+    border-color: #e5eaf2;
+    border-radius: 17px;
+    box-shadow: 0 3px 12px rgba(32, 52, 89, 0.045);
+    text-align: left;
+    cursor: pointer;
+    transition:
+        transform 0.2s ease,
+        box-shadow 0.2s ease,
+        border-color 0.2s ease;
+}
+
+.dashboard-card::after {
+    position: absolute;
+    right: -25px;
+    bottom: -55px;
+    width: 130px;
+    height: 130px;
+    border-radius: 50%;
+    background: rgba(49, 95, 232, 0.045);
+    content: "";
+    pointer-events: none;
+}
+
+.dashboard-card:hover {
+    transform: translateY(-3px);
+    border-color: #cad7f5;
+    box-shadow: 0 12px 26px rgba(32, 52, 89, 0.1);
+}
+
+.dashboard-card:focus-visible,
+.nav-item:focus-visible,
+.item-action:focus-visible {
+    outline: 3px solid rgba(49, 95, 232, 0.3);
+    outline-offset: 3px;
+}
+
+.card-label {
+    color: #64738a;
+    font-size: 13px;
+    font-weight: 650;
+}
+
+.card-icon {
+    width: 36px;
+    height: 36px;
+    border: 1px solid rgba(49, 95, 232, 0.07);
+    border-radius: 11px;
+    font-size: 16px;
+}
+
+.dashboard-card:nth-child(2) .card-icon {
+    background: #f3efff;
+    color: #7653d6;
+}
+
+.dashboard-card:nth-child(3) .card-icon {
+    background: #eaf8f4;
+    color: #17866c;
+}
+
+.dashboard-card:nth-child(4) .card-icon {
+    background: #fff4e9;
+    color: #c87523;
+}
+
+.dashboard-card strong {
+    margin-top: 19px;
+    color: #1b2a45;
+    font-size: 34px;
+    letter-spacing: -1.1px;
+}
+
+.card-description {
+    margin-top: 7px;
+    font-size: 13px;
+}
+
+.content-card {
+    padding: 27px;
+    border-color: #e5eaf2;
+    border-radius: 17px;
+    box-shadow: 0 3px 12px rgba(32, 52, 89, 0.04);
+}
+
+.section-header h3 {
+    color: #1c2a43;
+    font-size: 19px;
+    letter-spacing: -0.35px;
+}
+
+.section-header p {
+    font-size: 14px;
+}
+
+.item-list {
+    gap: 11px;
+}
+
+.list-item,
+.subject-card {
+    border-color: #e7ebf2;
+    border-radius: 13px;
+    background: rgba(255, 255, 255, 0.88);
+    transition:
+        transform 0.18s ease,
+        border-color 0.18s ease,
+        box-shadow 0.18s ease;
+}
+
+.list-item:hover,
+.subject-card:hover {
+    transform: translateY(-1px);
+    border-color: #d4def0;
+    box-shadow: 0 7px 18px rgba(32, 52, 89, 0.065);
+}
+
+.item-content h4 {
+    font-size: 15px;
+}
+
+.item-meta {
+    font-size: 13px;
+}
+
+.item-tag {
+    border-radius: 7px;
+    background: #edf2ff;
+    color: #3157c5;
+}
+
+.item-action {
+    min-height: 36px;
+    padding: 0 11px;
+    border-color: #e1e6ef;
+    border-radius: 9px;
+    background: #fff;
+    font-size: 12px;
+}
+
+.subject-card {
+    padding: 20px;
+}
+
+.subject-card h4 {
+    font-size: 16px;
+}
+
+.empty-state {
+    border-color: #d9e1ee;
+    border-radius: 14px;
+    background: linear-gradient(145deg, #fafbfe, #f5f8fd);
+    font-size: 14px;
+}
+
+.modal {
+    background: rgba(21, 34, 57, 0.5);
+    backdrop-filter: blur(5px);
+}
+
+.modal-content {
+    border-color: rgba(255, 255, 255, 0.75);
+    box-shadow: 0 28px 80px rgba(15, 23, 42, 0.24);
+}
+
+@media (max-width: 1100px) {
+    .content {
+        padding: 34px 30px;
+    }
+}
+
+@media (max-width: 768px) {
+    .sidebar {
+        background: rgba(255, 255, 255, 0.97);
+        box-shadow: 0 -8px 28px rgba(32, 52, 89, 0.08);
+        padding-bottom: env(safe-area-inset-bottom);
+    }
+
+    .nav-item {
+        border-radius: 12px;
+    }
+
+    .nav-item:hover {
+        transform: none;
+    }
+
+    .nav-item.active {
+        border-color: transparent;
+        background: #edf2ff;
+    }
+
+    .content {
+        padding: 24px 18px 102px;
+    }
+
+    .topbar {
+        padding-bottom: 20px;
+    }
+
+    .dashboard-card {
+        min-height: 140px;
+        padding: 17px;
+    }
+
+    .content-card {
+        padding: 21px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .nav-item,
+    .primary-button,
+    .secondary-button,
+    .dashboard-card,
+    .list-item,
+    .subject-card {
+        transition: none;
+    }
+
+    .nav-item:hover,
+    .primary-button:hover,
+    .dashboard-card:hover,
+    .list-item:hover,
+    .subject-card:hover {
+        transform: none;
+    }
 }

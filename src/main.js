@@ -61,6 +61,7 @@ import {
     error
 } from "./components/notifications.js";
 import { getStorageIssues } from "./save.js";
+import { createIcon } from "./components/icons.js";
 
 
 const addButton = document.querySelector("#addButton");
@@ -113,6 +114,28 @@ function createElement(tag, className = "", text = "") {
 
     return element;
 }
+
+function installStaticIcons() {
+    document.querySelectorAll("[data-icon]").forEach(element => {
+        const icon = createIcon(element.dataset.icon);
+        if (icon) element.replaceChildren(icon);
+    });
+
+    const addMenuIcons = {
+        tasks: "task",
+        presentations: "presentation",
+        notes: "note",
+        files: "upload",
+        fileLink: "link",
+        subjects: "subjects"
+    };
+    document.querySelectorAll("[data-add-type]").forEach(button => {
+        const icon = createIcon(addMenuIcons[button.dataset.addType]);
+        if (icon) button.prepend(icon);
+    });
+}
+
+installStaticIcons();
 
 function showDeletedFilesNotice() {
     const previousFocus = document.activeElement;
@@ -197,10 +220,24 @@ function formatCreatedDate(timestamp) {
 function createActionButton(text, className = "") {
     const button = createElement(
         "button",
-        `item-action ${className}`,
-        text
+        `item-action ${className}`
     );
+    const iconNames = {
+        Bearbeiten: "edit",
+        Löschen: "delete",
+        Öffnen: "open",
+        Herunterladen: "download",
+        Details: "info",
+        Entfernen: "remove",
+        Zurück: "previous",
+        Weiter: "next",
+        Vollbild: "fullscreen"
+    };
+    const icon = createIcon(iconNames[text]);
+    const label = createElement("span", "", text);
 
+    if (icon) button.appendChild(icon);
+    button.appendChild(label);
     button.type = "button";
 
     return button;
@@ -636,7 +673,7 @@ function openTaskModal(existingTask = null) {
 
     const titleField = createField({
         label: "Titel",
-        placeholder: "z. B. Mathe Hausaufgaben",
+        placeholder: "z. B. Hausaufgaben in Mathe",
         value: existingTask?.title ?? "",
         name: "title",
         required: true,
@@ -2249,7 +2286,9 @@ function openFileModal(
 
                 const failed = selections.filter(item => item.status === "Fehlgeschlagen").length;
                 if (failed > 0) {
-                    status.textContent = `${failed} Datei(en) konnten nicht gespeichert werden.`;
+                    status.textContent = failed === 1
+                        ? "Eine Datei konnte nicht gespeichert werden."
+                        : `${failed} Dateien konnten nicht gespeichert werden.`;
                     error(uploadFailureMessage || "Mindestens eine Datei konnte nicht gespeichert werden.");
                     renderAll();
                     return;
@@ -2258,7 +2297,9 @@ function openFileModal(
                 status.textContent = "Alle Dateien wurden gespeichert.";
                 closeModal();
                 renderAll();
-                success(`${pending.length} Datei(en) hochgeladen.`);
+                success(pending.length === 1
+                    ? "Eine Datei wurde hochgeladen."
+                    : `${pending.length} Dateien wurden hochgeladen.`);
             }
         });
         return;
@@ -2742,8 +2783,14 @@ async function initializeApplication() {
             const migration = await migrateLegacySharedData();
             if (migration.files > 0 || migration.presentations > 0) {
                 await refreshSharedData();
+                const migratedFiles = migration.files === 1
+                    ? "Eine alte Datei"
+                    : `${migration.files} alte Dateien`;
+                const migratedProjects = migration.presentations === 1
+                    ? "ein altes Projekt"
+                    : `${migration.presentations} alte Projekte`;
                 success(
-                    `${migration.files} alte Datei(en) und ${migration.presentations} alte(s) Projekt(e) wurden für alle Nutzer freigegeben.`
+                    `${migratedFiles} und ${migratedProjects} wurden für alle Nutzer freigegeben.`
                 );
             }
         } catch (migrationError) {
