@@ -17,12 +17,34 @@ let pool;
 let handler;
 let storageClient;
 
+export function getDatabaseConnectionString(env = process.env) {
+    for (const value of [env.POSTGRES_URL, env.DATABASE_URL]) {
+        if (typeof value !== "string") continue;
+        let connectionString = value.trim();
+        if (!connectionString) continue;
+        if (
+            (connectionString.startsWith('"') && connectionString.endsWith('"')) ||
+            (connectionString.startsWith("'") && connectionString.endsWith("'"))
+        ) {
+            connectionString = connectionString.slice(1, -1).trim();
+        }
+        let parsed;
+        try {
+            parsed = new URL(connectionString);
+        } catch {
+            throw new Error("Die Datenbankverbindungszeichenfolge ist ungültig. Prüfe DATABASE_URL in den Vercel-Einstellungen.");
+        }
+        if (!["postgres:", "postgresql:"].includes(parsed.protocol)) {
+            throw new Error("DATABASE_URL muss eine PostgreSQL-Verbindungszeichenfolge sein.");
+        }
+        return connectionString;
+    }
+    throw new Error("Die Umgebungsvariable POSTGRES_URL (oder DATABASE_URL) ist nicht konfiguriert.");
+}
+
 function getPool() {
     if (pool) return pool;
-    const connectionString = process.env.POSTGRES_URL ?? process.env.DATABASE_URL;
-    if (!connectionString) {
-        throw new Error("Die Umgebungsvariable POSTGRES_URL (oder DATABASE_URL) ist nicht konfiguriert.");
-    }
+    const connectionString = getDatabaseConnectionString();
     pool = new Pool({
         connectionString,
         max: 1,
@@ -141,13 +163,17 @@ export default async function handleVercelApiRequest(request, response) {
             return;
         }
         response.statusCode = error.message.includes("POSTGRES_URL")
+            || error.message.includes("DATABASE_URL")
             || error.message.includes("BLOB_READ_WRITE_TOKEN")
+            || error.message.includes("Datenbankverbindungszeichenfolge")
             ? 503
             : 500;
         response.setHeader("Content-Type", "application/json; charset=utf-8");
         response.end(JSON.stringify({
             error: error.message.includes("POSTGRES_URL")
+                || error.message.includes("DATABASE_URL")
                 || error.message.includes("BLOB_READ_WRITE_TOKEN")
+                || error.message.includes("Datenbankverbindungszeichenfolge")
                 ? error.message
                 : "Die Serveranfrage konnte nicht verarbeitet werden."
         }));
