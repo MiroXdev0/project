@@ -14,7 +14,15 @@ test("Vercel file-id route is explicit and DELETE uses /api/files/:id", async ()
     const { default: fileFunction, config: fileConfig } = await import("../api/files/[id].js");
     assert.equal(typeof fileFunction, "function");
     assert.equal(fileConfig.api.bodyParser, false);
+});
 
+test("Vercel file-content route is explicit and keeps request bodies unparsed", async () => {
+    const { default: contentFunction, config: contentConfig } = await import("../api/files/[id]/content.js");
+    assert.equal(typeof contentFunction, "function");
+    assert.equal(contentConfig.api.bodyParser, false);
+});
+
+test("DELETE uses /api/files/:id", async () => {
     const originalFetch = globalThis.fetch;
     let requestedUrl;
     let requestedMethod;
