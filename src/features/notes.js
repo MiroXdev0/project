@@ -5,7 +5,7 @@ const STORAGE_KEY = "notes";
 let notes = loadData(STORAGE_KEY, []);
 
 export function getNotes() {
-    return notes;
+    return notes.map(note => ({ ...note }));
 }
 
 export function addNote(
@@ -29,7 +29,7 @@ export function addNote(
         throw error;
     }
 
-    return note;
+    return { ...note };
 }
 
 export function updateNote(id, changes) {
@@ -42,7 +42,10 @@ export function updateNote(id, changes) {
     }
 
     const previous = { ...note };
-    Object.assign(note, changes);
+    Object.assign(note, changes, {
+        id: note.id,
+        createdAt: note.createdAt
+    });
     try {
         saveData(STORAGE_KEY, notes);
     } catch (error) {
@@ -50,10 +53,14 @@ export function updateNote(id, changes) {
         throw error;
     }
 
-    return note;
+    return { ...note };
 }
 
 export function deleteNote(id) {
+    if (!notes.some(note => note.id === id)) {
+        return false;
+    }
+
     const previousNotes = notes;
     notes = notes.filter(
         item => item.id !== id
@@ -65,4 +72,6 @@ export function deleteNote(id) {
         notes = previousNotes;
         throw error;
     }
+
+    return true;
 }

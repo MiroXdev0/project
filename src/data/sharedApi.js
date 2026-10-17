@@ -57,11 +57,14 @@ function jsonRequest(method, body) {
 }
 
 export function getSharedPresentations() {
-    return sharedData.presentations;
+    return sharedData.presentations.map(presentation => ({
+        ...presentation,
+        fileIds: [...(presentation.fileIds ?? [])]
+    }));
 }
 
 export function getSharedFiles() {
-    return sharedData.files;
+    return sharedData.files.map(file => ({ ...file }));
 }
 
 export function refreshSharedData() {
@@ -254,7 +257,7 @@ export function startSharedSync(onUpdate, onUnavailable) {
     let stopped = false;
     let unavailable = false;
     const refresh = async () => {
-        if (stopped) return;
+        if (stopped || document.visibilityState !== "visible") return;
         try {
             await refreshSharedData();
             if (unavailable) unavailable = false;

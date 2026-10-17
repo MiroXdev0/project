@@ -216,6 +216,22 @@ function formatCreatedDate(timestamp) {
     }).format(date);
 }
 
+function compareTaskDeadlines(first, second) {
+    if (!first.deadline && !second.deadline) {
+        return first.createdAt - second.createdAt;
+    }
+
+    if (!first.deadline) {
+        return 1;
+    }
+
+    if (!second.deadline) {
+        return -1;
+    }
+
+    return first.deadline.localeCompare(second.deadline);
+}
+
 
 function createActionButton(text, className = "") {
     const button = createElement(
@@ -420,19 +436,7 @@ function renderDashboard() {
 function renderRecentTasks() {
     const tasks = getTasks()
         .filter(task => !task.completed)
-        .sort((a, b) => {
-            if (!a.deadline) {
-                return 1;
-            }
-
-            if (!b.deadline) {
-                return -1;
-            }
-
-            return a.deadline.localeCompare(
-                b.deadline
-            );
-        })
+        .sort(compareTaskDeadlines)
         .slice(0, 5);
 
     if (tasks.length === 0) {
@@ -630,27 +634,13 @@ function renderTasks() {
 
     taskList.replaceChildren();
 
-    const sortedTasks = [...tasks].sort(
-        (a, b) => {
-            if (a.completed !== b.completed) {
-                return a.completed
-                    ? 1
-                    : -1;
-            }
-
-            if (!a.deadline) {
-                return 1;
-            }
-
-            if (!b.deadline) {
-                return -1;
-            }
-
-            return a.deadline.localeCompare(
-                b.deadline
-            );
+    const sortedTasks = [...tasks].sort((first, second) => {
+        if (first.completed !== second.completed) {
+            return first.completed ? 1 : -1;
         }
-    );
+
+        return compareTaskDeadlines(first, second);
+    });
 
     sortedTasks.forEach(task => {
         taskList.appendChild(
@@ -2513,6 +2503,19 @@ function createSubjectElement(subject) {
     deleteButton.addEventListener(
         "click",
         () => {
+            const associatedContentCount =
+                taskAmount +
+                presentationAmount +
+                noteAmount +
+                fileAmount;
+
+            if (associatedContentCount > 0) {
+                error(
+                    `Dieses Fach ist noch ${associatedContentCount === 1 ? "einem Inhalt" : `${associatedContentCount} Inhalten`} zugeordnet. Ändere zuerst die Fachzuordnung dieser Inhalte.`
+                );
+                return;
+            }
+
             if (!confirmDelete(
                 `Möchtest du das Fach "${subject.name}" wirklich löschen?`
             )) {

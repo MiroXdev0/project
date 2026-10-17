@@ -23,11 +23,11 @@ let subjects = validSubjects.map(subject => ({
 }));
 
 export function getSubjects() {
-    return subjects;
+    return subjects.map(subject => ({ ...subject }));
 }
 
 export function addSubject(name) {
-    const trimmedName = name.trim();
+    const trimmedName = typeof name === "string" ? name.trim() : "";
 
     if (!trimmedName) {
         return null;
@@ -40,7 +40,7 @@ export function addSubject(name) {
     );
 
     if (existing) {
-        return existing;
+        return { ...existing };
     }
 
     const subject = {
@@ -57,10 +57,14 @@ export function addSubject(name) {
         throw error;
     }
 
-    return subject;
+    return { ...subject };
 }
 
 export function deleteSubject(id) {
+    if (!subjects.some(subject => subject.id === id)) {
+        return false;
+    }
+
     const previousSubjects = subjects;
     subjects = subjects.filter(
         subject => subject.id !== id
@@ -72,4 +76,6 @@ export function deleteSubject(id) {
         subjects = previousSubjects;
         throw error;
     }
+
+    return true;
 }

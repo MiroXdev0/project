@@ -62,15 +62,13 @@ if (JSON.stringify(tasks) !== JSON.stringify(storedTasks)) {
 
 
 export function getTasks() {
-    return [...tasks];
+    return tasks.map(task => ({ ...task }));
 }
 
 
 export function getTask(id) {
-    return (
-        tasks.find(task => task.id === id) ??
-        null
-    );
+    const task = tasks.find(item => item.id === id);
+    return task ? { ...task } : null;
 }
 
 
@@ -118,7 +116,7 @@ export function addTask({
         throw error;
     }
 
-    return task;
+    return { ...task };
 }
 
 
@@ -152,7 +150,7 @@ export function updateTask(id, changes = {}) {
         throw error;
     }
 
-    return updatedTask;
+    return { ...updatedTask };
 }
 
 
@@ -224,12 +222,12 @@ export function clearTasks() {
 export function getOpenTasks() {
     return tasks.filter(
         task => !task.completed
-    );
+    ).map(task => ({ ...task }));
 }
 
 
 export function getCompletedTasks() {
     return tasks.filter(
         task => task.completed
-    );
+    ).map(task => ({ ...task }));
 }
