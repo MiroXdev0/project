@@ -84,6 +84,19 @@ export function refreshSharedData() {
     return refreshPromise;
 }
 
+function getSharedDataSnapshot() {
+    const presentations = sharedData.presentations
+        .map(presentation => ({
+            ...presentation,
+            fileIds: [...(presentation.fileIds ?? [])].sort()
+        }))
+        .sort((first, second) => first.id.localeCompare(second.id));
+    const files = [...sharedData.files]
+        .sort((first, second) => first.id.localeCompare(second.id));
+
+    return JSON.stringify({ presentations, files });
+}
+
 export async function createSharedPresentation(presentation) {
     const result = await request("/projects", jsonRequest("POST", presentation));
     mutateCollection("presentations", result);
@@ -258,10 +271,12 @@ export function startSharedSync(onUpdate, onUnavailable) {
     let unavailable = false;
     const refresh = async () => {
         if (stopped || document.visibilityState !== "visible") return;
+        const previousSnapshot = getSharedDataSnapshot();
         try {
             await refreshSharedData();
+            const snapshot = getSharedDataSnapshot();
             if (unavailable) unavailable = false;
-            onUpdate();
+            if (snapshot !== previousSnapshot) onUpdate();
         } catch (syncError) {
             console.error("[Schulorganizer] Gemeinsame Daten konnten nicht aktualisiert werden:", syncError);
             if (!unavailable) {

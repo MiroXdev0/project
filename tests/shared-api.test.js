@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { PGlite } from "@electric-sql/pglite";
 import catchAllFunction, { config as catchAllConfig } from "../api/[...path].js";
-import { deleteSharedFile, getUploadContentType } from "../src/data/sharedApi.js";
+import {
+    deleteSharedFile,
+    getUploadContentType,
+    refreshSharedData,
+    startSharedSync
+} from "../src/data/sharedApi.js";
 import { createApiHandler } from "../src/serverless/handler.js";
 
 test("Vercel catch-all API route keeps request bodies unparsed", () => {
@@ -45,6 +50,65 @@ test("PNG uploads retain an image MIME type when the browser omits it", () => {
     assert.equal(getUploadContentType({ name: "photo.PNG", type: "application/octet-stream" }), "image/png");
     assert.equal(getUploadContentType({ name: "photo.png", type: "image/png" }), "image/png");
     assert.equal(getUploadContentType({ name: "archive.exe", type: "" }), "application/octet-stream");
+});
+
+test("shared sync only rerenders when shared records change", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalWindow = globalThis.window;
+    const originalDocument = globalThis.document;
+    let apiState = {
+        presentations: [{ id: "project-1", fileIds: ["file-b", "file-a"] }],
+        files: [{ id: "file-a", name: "bild.png" }]
+    };
+    let intervalCallback;
+    let updates = 0;
+    globalThis.fetch = async () => new Response(JSON.stringify(apiState), {
+        headers: { "Content-Type": "application/json" }
+    });
+    globalThis.document = {
+        visibilityState: "visible",
+        addEventListener() {},
+        removeEventListener() {}
+    };
+    globalThis.window = {
+        setInterval(callback) {
+            intervalCallback = callback;
+            return 1;
+        },
+        clearInterval() {},
+        addEventListener() {},
+        removeEventListener() {}
+    };
+
+    try {
+        await refreshSharedData();
+        const stop = startSharedSync(() => {
+            updates += 1;
+        }, () => {});
+
+        try {
+            await intervalCallback();
+            assert.equal(updates, 0);
+
+            apiState = {
+                presentations: [{ id: "project-1", fileIds: ["file-a", "file-b"] }],
+                files: [
+                    { id: "file-a", name: "bild.png" },
+                    { id: "file-b", name: "neu.pdf" }
+                ]
+            };
+            await intervalCallback();
+            assert.equal(updates, 1);
+        } finally {
+            stop();
+        }
+    } finally {
+        globalThis.fetch = originalFetch;
+        if (originalWindow === undefined) delete globalThis.window;
+        else globalThis.window = originalWindow;
+        if (originalDocument === undefined) delete globalThis.document;
+        else globalThis.document = originalDocument;
+    }
 });
 
 let pg;
